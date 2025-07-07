@@ -57,6 +57,40 @@ async function handleCommand(message, client) {
             return;
         }
 
+        if (command === '!figurinha' || command === '!sticker') {
+            // Verifica se a mensagem é uma resposta a outra
+            if (message.hasQuotedMsg) {
+                const quotedMsg = await message.getQuotedMessage();
+
+                // Verifica se a mensagem respondida tem mídia (imagem/vídeo)
+                if (quotedMsg.hasMedia) {
+                    await message.reply("Criando sua figurinha, um momento... 🎨");
+
+                    try {
+                        // Baixa a mídia da mensagem respondida
+                        const media = await quotedMsg.downloadMedia();
+
+                        // Envia a mídia de volta como uma figurinha
+                        await client.sendMessage(from, media, {
+                            sendMediaAsSticker: true,
+                            stickerAuthor: "BotZap 🤖", // Opcional: autor da figurinha
+                            stickerName: "Criado pelo Bot"   // Opcional: nome do pacote
+                        });
+
+                    } catch (error) {
+                        console.error("Erro ao criar figurinha:", error);
+                        await message.reply("❌ Ih, deu erro! Não consegui fazer a figurinha. Tente com outra imagem ou vídeo curto.");
+                    }
+
+                } else {
+                    await message.reply("Você precisa responder a uma imagem ou vídeo para eu transformar em figurinha!");
+                }
+            } else {
+                await message.reply("Para criar uma figurinha, responda a uma imagem com o comando `!figurinha`.");
+            }
+            return; // Encerra o processamento do comando aqui
+        }
+
         let session;
         const isGroup = from.endsWith('@g.us');
 
