@@ -20,10 +20,11 @@ function getManilhaValor(vira) {
     return ORDEM_MANILHAS[indexManilha];
 }
 
-function formatarMaoParaMensagem(mao) {
-    let textoMao = 'Sua mão atualizada!\nPara jogar, digite:\n`!carta <número>`\nou\n`!carta <número> hide` (para esconder)\n\n';
-    textoMao += `*Manilha da rodada:* ${manilhaValor}\n\n`; 
-    textoMao += 'Para jogar, digite:\n`!carta <número>`\nou\n`!carta <número> hide` (para esconder)\n\n';
+function formatarMaoParaMensagem(mao, manilhaValor) {
+    // 1. Começa a mensagem de forma limpa
+    let textoMao = 'Sua mão:\n\n';
+
+    // 2. Adiciona a lista de cartas
     let temCarta = false;
     mao.forEach((carta, index) => {
         // Mostra apenas as cartas que não foram jogadas (não são nulas)
@@ -34,9 +35,17 @@ function formatarMaoParaMensagem(mao) {
             textoMao += `${index + 1}. ${valor}${NAIPE_EMOJI[naipe]}\n`;
         }
     });
+    
+    // 3. Adiciona a informação da manilha
+    textoMao += `\n*Manilha:* ${manilhaValor}\n\n`;
+
     if (!temCarta) {
         return 'Você não tem mais cartas para jogar.';
     }
+    
+    // 4. Adiciona as instruções no final, onde fazem mais sentido
+    textoMao += '\nPara jogar, digite:\n`!carta <número>`\nou\n`!carta <número> hide` (para esconder)';
+    
     return textoMao;
 }
 
