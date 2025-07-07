@@ -15,6 +15,15 @@ async function handleCommand(message, client) {
             const session = sessionManager.getSession(from);
             if (!session) return console.log('[DEBUG] Sessão não encontrada para comando de debug.');
 
+            else if (command === '!debug-setvira') {
+                const viraCard = commandArgs[1];
+                if (viraCard && session.gameState) {
+                    session.gameState.vira = viraCard;
+                    session.gameState.manilhaValor = require('../games/Truco/truco').getManilhaValor(viraCard);
+                    console.log(`[DEBUG] Vira definido para: ${viraCard} | Manilha agora é: ${session.gameState.manilhaValor}`);
+                }
+            }
+
             if (command === '!debug-sethand') {
                 const playerId = commandArgs[1];
                 const cards = commandArgs.slice(2); // Pega todas as cartas

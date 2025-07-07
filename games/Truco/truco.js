@@ -70,6 +70,7 @@ function prepararJogo(session) {
         placar: { time1: 0, time2: 0 },
         valorDaMao: 1,
         turnosGanhos: { time1: 0, time2: 0 },
+        vencedorPrimeiroTurno: null,
         primeiroTurnoEmpatado: false,
         numeroDoTurno: 1,
         jogadores: session.players.map(p => ({ ...p, mao: [] })),
@@ -78,6 +79,7 @@ function prepararJogo(session) {
         manilhaValor: null,
         cartasNaMesa: [],
         vezDoJogador: 0,
+        maoDaVez: 0,
         status: 'aguardando_jogada',
         trucoState: null,
         actionLock: false,
@@ -165,33 +167,49 @@ async function iniciarRodada(session, client) {
     }
 }
 
-async function finalizarMao(session, client) {
-    console.log(`\n[DEBUG] --- Finalizando Mão #${session.gameState.rodada} ---`); // ADICIONE AQUI    
+async function finalizarMao(session, client, motivo = { tipo: 'vitoria_normal' }) {
+    console.log(`\n[DEBUG] --- Finalizando Mão #${session.gameState.rodada} --- Motivo: ${motivo.tipo}`);    
     const gameState = session.gameState;
-    const { turnosGanhos, placar, valorDaMao } = gameState;
+    const { placar } = gameState;
 
-    let timeVencedor = null;
-    if (turnosGanhos.time1 > turnosGanhos.time2) {
-        timeVencedor = 'time1';
-        placar.time1 += valorDaMao;
-    } else if (turnosGanhos.time2 > turnosGanhos.time1) {
-        timeVencedor = 'time2';
-        placar.time2 += valorDaMao;
-    }
-    // Se empatar em turnos (ex: 1 a 1 e o último empata), ninguém pontua.
+    let mensagemResultado = '';
 
-    let mensagemPlacar = `*Fim da mão!*`;
-    if (timeVencedor) {
-        const nomeTime = timeVencedor === 'time1' ? 'Time Blue 🔵' : 'Time Red 🔴';
-        mensagemPlacar += `\n\n*${nomeTime}* venceu e marcou *${valorDaMao}* ponto(s).`;
-    } else {
-        mensagemPlacar += `\n\nA mão empatou! Ninguém marcou pontos.`;
+    switch (motivo.tipo) {
+        case 'fuga':
+            // Caso a mão termine porque alguém correu, montamos esta mensagem.
+            const nomeTimeVencedorFuga = motivo.timeVencedor === 'time1' ? 'Time Blue 🔵' : 'Time Red 🔴';
+            const timeQueCorreu = motivo.timeVencedor === 'time1' ? 'Time Red 🔴' : 'Time Blue 🔵';
+            mensagemResultado = `*${timeQueCorreu}* correu da aposta! 🏃‍♂️\n\n*${nomeTimeVencedorFuga}* marcou *${motivo.valor}* ponto(s).`;
+            break;
+
+        case 'vitoria_normal':
+        default:
+            // Esta é a lógica original, que agora só roda para vitórias normais ou empates.
+            const { turnosGanhos, valorDaMao } = gameState;
+            let timeVencedor = null;
+            if (turnosGanhos.time1 > turnosGanhos.time2) {
+                timeVencedor = 'time1';
+                placar.time1 += valorDaMao;
+            } else if (turnosGanhos.time2 > turnosGanhos.time1) {
+                timeVencedor = 'time2';
+                placar.time2 += valorDaMao;
+            }
+
+            if (timeVencedor) {
+                const nomeTimeVencedor = timeVencedor === 'time1' ? 'Time Blue 🔵' : 'Time Red 🔴';
+                mensagemResultado = `*${nomeTimeVencedor}* venceu a mão e marcou *${valorDaMao}* ponto(s).`;
+            } else {
+                mensagemResultado = `A mão empatou! Ninguém marcou pontos.`;
+            }
+            break;
     }
-    mensagemPlacar += `\n\n*Placar:*\nTime Blue 🔵: *${placar.time1}* \nTime Red 🔴: *${placar.time2}*`;
+
+    // A montagem final da mensagem é a mesma para todos os casos.
+    const mensagemPlacar = `*Fim da mão!*\n\n${mensagemResultado}\n\n*Placar:*\nTime Blue 🔵: *${placar.time1}* \nTime Red 🔴: *${placar.time2}*`;
 
     await client.sendMessage(session.groupId, mensagemPlacar);
 
-    // Verifica se o jogo acabou
+    // O resto da função para verificar o fim do jogo e preparar a próxima mão continua igual.
     if (placar.time1 >= 12 || placar.time2 >= 12) {
         const nomeTimeVencedor = placar.time1 >= 12 ? 'Time Blue 🔵' : 'Time Red 🔴';
         await client.sendMessage(session.groupId, `*O JOGO ACABOU!* 🏆\n\nParabéns ao *${nomeTimeVencedor}* pela vitória!`);
@@ -199,7 +217,6 @@ async function finalizarMao(session, client) {
         return;
     }
 
-    // Prepara para a próxima mão
     gameState.rodada++;
     gameState.numeroDoTurno = 1;
     gameState.valorDaMao = 1;
@@ -223,9 +240,7 @@ async function finalizarTurno(session, client) {
 
     for (const jogada of gameState.cartasNaMesa) {
         const forca = jogada.isHidden ? -1 : getForcaCarta(jogada.carta, gameState.manilhaValor);
-
         console.log(`[FORCA_DEBUG] Carta: ${jogada.carta}, Manilha: ${gameState.manilhaValor}, Força Calculada: ${forca}`);
-
         if (forca > maiorForca) {
             maiorForca = forca;
             jogadaVencedora = jogada;
@@ -236,32 +251,30 @@ async function finalizarTurno(session, client) {
     let mensagemResultado = '';
     let aMaoAcabou = false;
 
-    // --- NOVA LÓGICA DE EMPATE ---
     if (vencedores.length > 1) {
         mensagemResultado = 'O turno *empatou*!';
-        // REGRA #1: Empate na primeira
         if (gameState.numeroDoTurno === 1) {
             gameState.primeiroTurnoEmpatado = true;
             mensagemResultado += '\nQuem vencer o próximo turno, leva a mão!';
         } else {
-            // REGRA #2: Empate na segunda ou terceira -> Mão acaba.
-            // O vencedor será quem ganhou o primeiro turno. A `finalizarMao` cuida disso.
             aMaoAcabou = true;
         }
-    } 
-    // --- LÓGICA DE VITÓRIA (sem empate no turno) ---
-    else {
+    } else {
         const jogadorVencedor = gameState.jogadores.find(p => p.id === jogadaVencedora.jogadorId);
         const timeIndex = gameState.jogadores.findIndex(p => p.id === jogadorVencedor.id);
         const timeVencedorTurno = (timeIndex % 2 === 0) ? 'time1' : 'time2';
         gameState.turnosGanhos[timeVencedorTurno]++;
+        
+        if (gameState.numeroDoTurno === 1) {
+            gameState.vencedorPrimeiroTurno = timeVencedorTurno;
+        }
+
         console.log(`[DEBUG] Vencedor do turno: ${timeVencedorTurno}. Placar de turnos: T1=${gameState.turnosGanhos.time1}, T2=${gameState.turnosGanhos.time2}`);
         mensagemResultado = `*${jogadorVencedor.name}* (${timeVencedorTurno === 'time1' ? '🔵' : '🔴'}) venceu o turno!`;
     }
     
     await client.sendMessage(session.groupId, mensagemResultado);
 
-    // --- VERIFICA SE A MÃO ACABOU (lógica mais robusta) ---
     const { turnosGanhos, numeroDoTurno, primeiroTurnoEmpatado } = gameState;
     const vitoriasTime1 = turnosGanhos.time1;
     const vitoriasTime2 = turnosGanhos.time2;
@@ -271,19 +284,30 @@ async function finalizarTurno(session, client) {
         return;
     }
 
-    // --- SE A MÃO NÃO ACABOU, PREPARA O PRÓXIMO TURNO ---
     gameState.numeroDoTurno++;
     gameState.cartasNaMesa = [];
     
-    const proximoJogadorIndex = vencedores.length > 1
-        ? gameState.vezDoJogador // Se empatou, quem abriu o turno abre o próximo
-        : gameState.jogadores.findIndex(p => p.id === jogadaVencedora.jogadorId); // Se teve vencedor, ele abre
+    let proximoJogadorIndex;
+    if (vencedores.length > 1) {
+        // REGRA CORRIGIDA: Se o turno empatou, o "mão" (quem começou) joga de novo.
+        proximoJogadorIndex = gameState.maoDaVez;
+    } else if (vitoriasTime1 === 1 && vitoriasTime2 === 1) {
+        proximoJogadorIndex = gameState.jogadores.findIndex(p => {
+            const timeDoJogador = (gameState.jogadores.findIndex(j => j.id === p.id) % 2 === 0) ? 'time1' : 'time2';
+            return timeDoJogador === gameState.vencedorPrimeiroTurno;
+        });
+    } else {
+        proximoJogadorIndex = gameState.jogadores.findIndex(p => p.id === jogadaVencedora.jogadorId);
+    }
         
     gameState.vezDoJogador = proximoJogadorIndex;
+    // **ATUALIZAÇÃO IMPORTANTE:** O próximo a jogar se torna o "mão" do novo turno.
+    gameState.maoDaVez = proximoJogadorIndex; 
+    
     const proximoJogador = gameState.jogadores[proximoJogadorIndex];
 
     await client.sendMessage(session.groupId, `--- ${gameState.numeroDoTurno}º Turno ---\nÉ a vez de *${proximoJogador.name}* jogar.`);
-
+    
     if (proximoJogador.id === trucoBot.BOT_ID) {
         await processarAcaoBot(session, client);
     } else {
@@ -515,10 +539,16 @@ async function correrDoTruco(message, session, client) {
     const valorCorrido = gameState.valorDaMao === 3 ? 1 : (gameState.valorDaMao / 2);
     const timeVencedor = gameState.trucoState.challengedBy;
     
+    // A pontuação continua sendo calculada aqui
     gameState.placar[timeVencedor] += valorCorrido;
 
-    await client.sendMessage(session.groupId, `O time ${playerTeam === 'time1' ? 'Blue' : 'Red'} correu! 🏃‍♂️`);
-    await finalizarMao(session, client); // Reutiliza a função de fim de mão para mostrar placar e reiniciar
+    // A chamada para finalizarMao agora inclui um objeto 'motivo'
+    // que descreve exatamente o que aconteceu.
+    await finalizarMao(session, client, { 
+        tipo: 'fuga', 
+        timeVencedor: timeVencedor,
+        valor: valorCorrido 
+    });
 }
 
 async function aumentarAposta(message, session, client) {
@@ -568,5 +598,6 @@ module.exports = {
     pedirTruco,
     aceitarTruco,
     correrDoTruco,
-    aumentarAposta
+    aumentarAposta,
+    getManilhaValor 
 };
