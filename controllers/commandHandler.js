@@ -6,7 +6,7 @@ const pokerActions = require('../games/Poker/playerActions');
 const trucoActions = require('../games/Truco/playerActions');
 const forcaActions = require('../games/Forca/playerActions');
 const velhaActions = require('../games/Velha/playerActions');
-const riotService = require('../services/riotService');
+
 
 
 async function handleCommand(message, client) {
