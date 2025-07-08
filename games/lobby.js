@@ -7,14 +7,11 @@ const sessionManager = require('../sessions/sessionManager');
 const trucoBot = require('./Truco/botPlayer');
 const forca = require('./Forca/forca');
 const velha = require('./Velha/velha')
+const forcaBot = require('./Forca/botPlayer');
 
 // --- LÓGICA PRINCIPAL DO LOBBY ---
 
-/**
- * Função "mãe" que direciona a criação do lobby para o jogo correto.
- * @param {object} session - A sessão do jogo.
- * @param {object} client - O cliente do WhatsApp.
- */
+
 async function criarLobby(session, client) {
     session.status = 'lobby';
     console.log(`[Lobby] Criando lobby para o jogo: ${session.game}`);
@@ -33,22 +30,33 @@ async function criarLobby(session, client) {
     await client.sendMessage(session.groupId, lobbyMessage);
 }
 
-/**
- * Função "mãe" que direciona os comandos do lobby para o jogo correto.
- * @param {object} message - O objeto da mensagem.
- * @param {object} session - A sessão de jogo ativa.
- * @param {object} client - O cliente do WhatsApp.
- */
 async function handleLobbyCommand(message, session, client) {
     const command = message.body.split(' ')[0].toLowerCase();
+    const playerId = message.author || message.from; // <-- VARIÁVEL MOVIDA PARA CIMA
 
-    // Comandos universais do lobby
     switch (command) {
-        case '!sair': // Renomeado
-            if (sessionManager.endSession(session.groupId)) {
-                await message.reply('O lobby foi encerrado.');
+        case '!sair':
+            if (playerId !== session.creatorId) {
+                // Se não for o criador, podemos remover apenas o jogador
+                const playerIndex = session.players.findIndex(p => p.id === playerId);
+                if (playerIndex > -1) {
+                    const playerName = session.players[playerIndex].name;
+                    session.players.splice(playerIndex, 1);
+                    sessionManager.unmapPlayersInGroup([playerId]);
+                    await message.reply(`*${playerName}* saiu do lobby.`);
+                    // Atualiza a mensagem do lobby para o grupo
+                    const lobbyMessage = gerarMensagemLobby(session);
+                    await client.sendMessage(session.groupId, lobbyMessage);
+                }
+                // Ignora silenciosamente se a pessoa não estiver no lobby
+            } else {
+                // Se for o criador, encerra o lobby para todos
+                if (sessionManager.endSession(session.groupId)) {
+                    await message.reply('O lobby foi encerrado pelo criador.');
+                }
             }
             return;
+            
         case '!ajuda':
         case '!comandos':
         case '!help':
@@ -117,28 +125,45 @@ async function handlePokerLobby(message, session, client) {
             await adicionarJogadorPoker(message, session, client);
             break;
         case '!iniciar':
-            await iniciarJogoPoker(message, session, client);
+            // Direciona para o iniciador correto
+            if (session.game === 'poker') {
+                await iniciarJogoPoker(message, session, client);
+            } else if (session.game === 'forca') {
+                // Certifique-se de que ele está chamando a função correta
+                await iniciarJogoForca(message, session, client);
+            } else if (session.game === 'velha') {
+                await iniciarJogoVelha(message, session, client);
+            }
             break;
     }
 }
 
+const MAX_NAME_LENGTH = 20; // Limite de 20 caracteres para nomes
+
 async function adicionarJogadorPoker(message, session, client) {
     const { author, body } = message;
     const playerId = author || message.from;
-    // Limite dinâmico: 2 para a velha, 8 para os outros jogos
     const MAX_PLAYERS = session.game === 'velha' ? 2 : 8;
 
     if (session.players.length >= MAX_PLAYERS) {
         return message.reply('❌ A sala está cheia!');
     }
-    // O resto da função continua exatamente igual...
     if (session.players.some(p => p.id === playerId)) {
         return message.reply('✔️ Você já está na mesa.');
     }
-    const playerName = body.split(' ').slice(1).join(' ').trim();
+    
+    // --- CORREÇÃO ADICIONADA AQUI ---
+    let playerName = body.split(' ').slice(1).join(' ').trim();
     if (!playerName) {
         return message.reply('⚠️ Por favor, digite seu nome. Ex: `!entrar João`');
     }
+
+    if (playerName.length > MAX_NAME_LENGTH) {
+        playerName = playerName.substring(0, MAX_NAME_LENGTH);
+        await message.reply(`Seu nome era muito longo e foi encurtado para: *${playerName}*`);
+    }
+    // --- FIM DA CORREÇÃO ---
+
     session.players.push({ id: playerId, name: playerName });
     sessionManager.mapPlayerToGroup(playerId, session.groupId);
     const lobbyMessage = gerarMensagemLobby(session);
@@ -215,11 +240,11 @@ async function handleTrucoLobby(message, session, client) {
 }
 
 async function adicionarJogadorTruco(message, session, client) {
+    // ... (validações iniciais) ...
     const { author, body } = message;
     const playerId = author || message.from;
     const args = body.split(' ').slice(1);
-
-    // Validações Iniciais
+    
     if (session.players.timeBlue.some(p => p.id === playerId) || session.players.timeRed.some(p => p.id === playerId)) {
         return message.reply('✔️ Você já está em um time.');
     }
@@ -231,39 +256,44 @@ async function adicionarJogadorTruco(message, session, client) {
     let timeEscolhido = args[args.length - 1].toLowerCase();
     let timeObject;
 
-    // Cenário 1: Jogador especificou um time
     if (timeEscolhido === 'blue' || timeEscolhido === 'red') {
         playerName = args.slice(0, -1).join(' ').trim();
-        if (!playerName) {
-            return message.reply('⚠️ Por favor, digite seu nome antes do time. Ex: `!entrar João blue`');
-        }
-        
+    } else {
+        playerName = args.join(' ').trim();
+    }
+
+    if (!playerName) {
+        return message.reply('⚠️ Por favor, digite seu nome. Ex: `!entrar João blue`');
+    }
+
+    // --- CORREÇÃO ADICIONADA AQUI ---
+    if (playerName.length > MAX_NAME_LENGTH) {
+        playerName = playerName.substring(0, MAX_NAME_LENGTH);
+        await message.reply(`Seu nome era muito longo e foi encurtado para: *${playerName}*`);
+    }
+    // --- FIM DA CORREÇÃO ---
+
+    // ... (Restante da lógica para escolher o time e adicionar o jogador) ...
+    // Cenário 1: Jogador especificou um time
+    if (timeEscolhido === 'blue' || timeEscolhido === 'red') {
         timeObject = (timeEscolhido === 'blue') ? session.players.timeBlue : session.players.timeRed;
         if (timeObject.length >= 2) {
             return message.reply(`❌ O time ${timeEscolhido} já está cheio!`);
         }
-    
-    // Cenário 2: Jogador NÃO especificou um time (alocação automática)
-    } else {
-        playerName = args.join(' ').trim();
-        
-        if (session.players.timeBlue.length < 2) {
+    } else { // Cenário 2: Alocação automática
+        if (session.players.timeBlue.length <= session.players.timeRed.length && session.players.timeBlue.length < 2) {
             timeObject = session.players.timeBlue;
-            timeEscolhido = 'Blue 🔵';
+            await message.reply(`Você foi alocado automaticamente ao time *Blue 🔵*!`);
         } else if (session.players.timeRed.length < 2) {
             timeObject = session.players.timeRed;
-            timeEscolhido = 'Red 🔴';
+            await message.reply(`Você foi alocado automaticamente ao time *Red 🔴*!`);
         } else {
             return message.reply('❌ A mesa está cheia! Não há vagas em nenhum time.');
         }
-        await message.reply(`Você foi alocado automaticamente ao time *${timeEscolhido}*!`);
     }
-
-    // Adiciona o jogador ao time determinado
+    
     timeObject.push({ id: playerId, name: playerName });
     sessionManager.mapPlayerToGroup(playerId, session.groupId);
-
-    // Envia a atualização do lobby para o grupo
     const lobbyMessage = gerarMensagemLobby(session);
     await client.sendMessage(session.groupId, lobbyMessage);
 }
@@ -358,6 +388,15 @@ async function iniciarJogoForca(message, session, client) {
         return client.sendMessage(session.groupId, '⚠️ Não é possível iniciar um jogo sem jogadores!');
     }
 
+    // --- LÓGICA DO BOT ADICIONADA ---
+    // Se apenas um jogador humano iniciar, adicionamos o bot para competir.
+    if (session.players.length === 1) {
+        const bot = forcaBot.createBotPlayer();
+        session.players.push(bot);
+        await client.sendMessage(session.groupId, `🤖 ${bot.name} entrou na sala para adivinhar a sua palavra!`);
+    }
+    // --- FIM DA LÓGICA DO BOT ---
+
     session.status = 'em_jogo';
     forca.prepararJogo(session); // Prepara o estado do jogo
     await client.sendMessage(session.groupId, '💀 O *Jogo da Forca* está começando!');
@@ -414,16 +453,14 @@ function gerarMensagemLobbyVelha(session) {
 }
 
 async function iniciarJogoVelha(message, session, client) {
-    const botPlayer = require('./Velha/botPlayer'); // Importa para ter o ID do bot
+    const botPlayer = require('./Velha/botPlayer');
 
-    // LÓGICA PARA ADICIONAR O BOT QUANDO JOGA SOZINHO
     if (session.players.length === 1) {
         const bot = botPlayer.createBotPlayer();
         session.players.push(bot);
         await client.sendMessage(session.groupId, `🤖 ${bot.name} entrou para jogar contra você!`);
     }
 
-    // Esta verificação agora funciona, pois o bot foi adicionado antes
     if (session.players.length !== 2) {
         return message.reply('⚠️ É preciso exatamente 2 jogadores para iniciar o Jogo da Velha.');
     }
@@ -435,10 +472,10 @@ async function iniciarJogoVelha(message, session, client) {
     const primeiroJogador = session.players[0];
     const legenda = `♾️ O *Jogo da Velha Infinito* está começando!\n\nÉ a vez de *${primeiroJogador.name}* (❌). Use \`!jogar <posição>\`, ex: \`!jogar a1\`.`;
     
-    const displayInicial = await jogoDaVelha.montarDisplay(session.gameState);
+    // ALTERAÇÃO: Passamos 'null' para garantir que não haja destaque no início
+    const displayInicial = await jogoDaVelha.montarDisplay(session.gameState, null);
     await client.sendMessage(session.groupId, displayInicial, { caption: legenda });
 
-    // NOVO: Verifica se o primeiro a jogar é o bot e dispara a ação dele
     if (primeiroJogador.id === botPlayer.BOT_ID) {
         await jogoDaVelha.dispararAcaoBot(session, client);
     }

@@ -25,9 +25,10 @@ function prepararJogo(session) {
     };
 }
 
-async function montarDisplay(gameState) {
+async function montarDisplay(gameState, posicaoParaDestacar, linhaVencedora = null) {
     try {
-        const imagePath = await renderizarVelha(gameState.historicoDeJogadas);
+        // E passa essa informação para o renderizador
+        const imagePath = await renderizarVelha(gameState.historicoDeJogadas, posicaoParaDestacar, linhaVencedora);
         const media = MessageMedia.fromFilePath(imagePath);
         fs.unlinkSync(imagePath);
         return media;
@@ -47,10 +48,10 @@ function verificarVencedor(gameState) {
 
     if (posicoesDoJogador.size < 3) return null;
 
+    // ALTERAÇÃO: Agora a função retorna um objeto com o vencedor E a linha da vitória
     for (const vitoria of VITORIAS) {
-        const [p1, p2, p3] = vitoria;
-        if (posicoesDoJogador.has(p1) && posicoesDoJogador.has(p2) && posicoesDoJogador.has(p3)) {
-            return jogadorAtualId;
+        if (vitoria.every(p => posicoesDoJogador.has(p))) {
+            return { vencedor: jogadorAtualId, linha: vitoria };
         }
     }
     return null;
@@ -70,6 +71,7 @@ async function dispararAcaoBot(session, client) {
 }
 
 async function processarJogada(message, session, client) {
+    // ... (o início da função, com as validações, continua o mesmo) ...
     const { author, body } = message;
     const { gameState } = session;
     const jogadorAtualId = gameState.jogadores[gameState.vezDoJogador];
@@ -95,46 +97,49 @@ async function processarJogada(message, session, client) {
         return message.reply("Essa posição já está ocupada! Escolha outra.");
     }
     
-    // --- LÓGICA CORRIGIDA ---
-    // 1. Adiciona a nova jogada. O tabuleiro pode chegar a 9 peças por um instante.
     gameState.historicoDeJogadas.push({
         posicao,
         jogadorId: jogadorAtualId,
         simbolo: SIMBOLOS[gameState.vezDoJogador]
     });
 
-    // 2. AGORA, se o tabuleiro FICOU com mais de 8 peças, remove a mais antiga.
-    // Isso acontece na mesma jogada, antes de exibir o resultado.
+    const resultadoVitoria = verificarVencedor(gameState);
+
+    if (resultadoVitoria) {
+        const jogadorVencedor = session.players.find(p => p.id === resultadoVitoria.vencedor);
+        const legenda = `🏆 Fim de jogo! *${jogadorVencedor.name}* (${SIMBOLOS[gameState.vezDoJogador]}) venceu!`;
+        
+        // Passamos a linha da vitória para a função de montar o display
+        const display = await montarDisplay(gameState, null, resultadoVitoria.linha); 
+        await client.sendMessage(session.groupId, display, { caption: legenda });
+        
+        sessionManager.endSession(session.groupId);
+        return;
+    }
+
+    // O resto da função (se não houver vitória) continua exatamente igual...
     let infoPecaRemovida = null;
     if (gameState.historicoDeJogadas.length > 8) { 
-        const jogadaRemovida = gameState.historicoDeJogadas.shift(); // Remove a peça mais antiga do início da lista
+        const jogadaRemovida = gameState.historicoDeJogadas.shift(); 
         infoPecaRemovida = `O tabuleiro encheu! A jogada mais antiga (${jogadaRemovida.simbolo} em ${jogadaRemovida.posicao.toUpperCase()}) foi removida.`;
     }
-    // --- FIM DA LÓGICA CORRIGIDA ---
 
-    const vencedor = verificarVencedor(gameState);
+    let posicaoParaDestacar = null;
+    if (gameState.historicoDeJogadas.length === 8) {
+        posicaoParaDestacar = gameState.historicoDeJogadas[0].posicao;
+    }
+
     let legenda = '';
-    
     if (infoPecaRemovida) {
         legenda += `${infoPecaRemovida}\n\n`;
     }
     
-    if (vencedor) {
-        const jogadorVencedor = session.players.find(p => p.id === vencedor);
-        legenda += `🏆 Fim de jogo! *${jogadorVencedor.name}* (${SIMBOLOS[gameState.vezDoJogador]}) venceu!`;
-    } else {
-        gameState.vezDoJogador = (gameState.vezDoJogador + 1) % 2;
-        const proximoJogador = session.players.find(p => p.id === gameState.jogadores[gameState.vezDoJogador]);
-        legenda += `É a vez de *${proximoJogador.name}* (${SIMBOLOS[gameState.vezDoJogador]}). Use:\n \`!jogar <posição>\`.`;
-    }
+    gameState.vezDoJogador = (gameState.vezDoJogador + 1) % 2;
+    const proximoJogador = session.players.find(p => p.id === gameState.jogadores[gameState.vezDoJogador]);
+    legenda += `É a vez de *${proximoJogador.name}* (${SIMBOLOS[gameState.vezDoJogador]}). Use:\n \`!jogar <posição>\`.`;
     
-    const display = await montarDisplay(gameState);
+    const display = await montarDisplay(gameState, posicaoParaDestacar, null);
     await client.sendMessage(session.groupId, display, { caption: legenda });
-    
-    if (vencedor) {
-        sessionManager.endSession(session.groupId);
-        return;
-    }
     
     const proximoJogadorId = gameState.jogadores[gameState.vezDoJogador];
     if (proximoJogadorId === botPlayer.BOT_ID) {

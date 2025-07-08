@@ -590,6 +590,12 @@ async function aumentarAposta(message, session, client) {
     }
 }
 
+function limparTudo() {
+    console.log('[Truco] Módulo de truco resetado.');
+    // Atualmente, não há estado global neste módulo para limpar,
+    // mas esta função serve como uma garantia para o futuro.
+}
+
 
 module.exports = {
     prepararJogo,
@@ -599,5 +605,6 @@ module.exports = {
     aceitarTruco,
     correrDoTruco,
     aumentarAposta,
-    getManilhaValor 
+    getManilhaValor,
+    limparTudo
 };

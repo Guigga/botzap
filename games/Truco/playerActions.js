@@ -3,7 +3,6 @@
 const truco = require('./truco');
 const sessionManager = require('../../sessions/sessionManager');
 
-
 async function handleGameCommand(message, session, client) {
     const { from, body } = message;
     const commandArgs = body.split(' ');
@@ -29,11 +28,18 @@ async function handleGameCommand(message, session, client) {
         case '!pede12':
             await truco.aumentarAposta(message, session, client);
             break;
+        
+        // --- CORREÇÃO IMPORTANTE AQUI ---
         case '!sair':
+            // 1. Manda o módulo de Truco limpar qualquer estado interno
+            truco.limparTudo();
+            
+            // 2. AGORA, encerra a sessão no gerenciador
             if (sessionManager.endSession(session.groupId)) {
                 await message.reply('O jogo foi encerrado.');
             }
             break;
+            
         default:
             if (command.startsWith('!')) {
                  await message.reply("Comando de Truco não reconhecido.");

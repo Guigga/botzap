@@ -3,15 +3,16 @@
 const sessions = {};
 const playerSessionMap = {};
 
-function createSession(groupId, game) {
+function createSession(groupId, game, creatorId) { // Adicionado creatorId
     if (!sessions[groupId]) {
         sessions[groupId] = {
             groupId: groupId,
+            creatorId: creatorId, // <-- NOVA PROPRIEDADE
             game: game,
             players: [], 
             gameState: null, 
         };
-        console.log(`Sessão criada para o grupo: ${groupId} para o jogo: ${game}`);
+        console.log(`Sessão criada para o grupo: ${groupId} para o jogo: ${game} por ${creatorId}`);
     }
     return sessions[groupId];
 }

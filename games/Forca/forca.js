@@ -1,166 +1,184 @@
 // C:\Users\Guilherme\bot-whatsapp\games\Forca\forca.js
 
 const { MessageMedia } = require('whatsapp-web.js');
-const path = require('path'); // Precisaremos do 'path'
+const path = require('path');
 const sessionManager = require('../../sessions/sessionManager');
 const getPalavraAleatoria = require('./palavras');
+const botPlayer = require('./botPlayer'); // Importa o nosso novo bot
 
 function montarDisplay(gameState) {
-    const { palavraSecreta, letrasCorretas, letrasErradas } = gameState;
-    const erros = letrasErradas.length;
-
-    // 1. Monta o texto da legenda
-    const palavraDisplay = palavraSecreta
-        .split('')
-        .map(letra => (letrasCorretas.includes(letra) ? letra : '_'))
-        .join(' ');
-
-    let legenda = `Palavra: *${palavraDisplay}*\n\n`;
-    if (letrasErradas.length > 0) {
-        legenda += `Letras erradas: ${letrasErradas.join(', ')}\n\n`;
-    }
-    legenda += `Para jogar, digite \`!letra <letra>\``;
-
-    // 2. Carrega a imagem estática correspondente ao número de erros
+    // Calcula o número de erros para saber qual imagem carregar (forca_0, forca_1, etc.)
+    const erros = 6 - gameState.vidas;
     const imagePath = path.join(__dirname, 'assets', `forca_${erros}.png`);
     const media = MessageMedia.fromFilePath(imagePath);
 
-    // 3. Retorna a imagem e a legenda prontas para serem enviadas
+    // Monta a legenda no formato que você pediu
+    const palavraDisplay = gameState.palavraOculta.join(' ');
+    let legenda = `Palavra: \`${palavraDisplay}\`\n\n`;
+
+    if (gameState.letrasTentadas.some(l => !gameState.palavra.includes(l))) {
+        const letrasErradas = gameState.letrasTentadas.filter(l => !gameState.palavra.includes(l));
+        legenda += `Letras erradas: ${letrasErradas.join(', ')}\n\n`;
+    }
+    
+    legenda += 'Para jogar, digite `!letra <letra>`';
+
     return { media, legenda };
 }
 
 /** Prepara o estado inicial do jogo da Forca */
 function prepararJogo(session) {
-    const numJogadores = session.players.length;
+    console.log(`[Forca] Jogo preparado para ${session.groupId}`);
     session.gameState = {
-        modo: numJogadores === 1 ? 'solo' : 'multiplayer',
         jogadores: session.players.map(p => ({ ...p })),
-        delegatorIndex: 0,
-        palavraSecreta: '',
-        palavraDefinida: false,
-        letrasCorretas: [],
-        letrasErradas: [],
-        tentativasMax: 6
+        definidorDaPalavra: null,
+        vezDoJogador: 0,
+        palavra: [],
+        palavraOculta: [],
+        letrasTentadas: [],
+        vidas: 6,
+        status: 'preparando' // Status: preparando, definindo_palavra, aguardando_palpite
     };
-    console.log(`[Forca] Jogo preparado no modo ${session.gameState.modo} com ${numJogadores} jogadores.`);
+    session.status = 'em_jogo';
 }
 
 /** Inicia uma nova rodada (ou a primeira) */
 async function iniciarRodada(session, client) {
     const { gameState } = session;
     
-    // Reseta o estado da rodada
-    gameState.palavraSecreta = '';
-    gameState.palavraDefinida = false;
-    gameState.letrasCorretas = [];
-    gameState.letrasErradas = [];
-
+    // ... (a lógica de reset da rodada continua a mesma)
+    gameState.palavra = [];
+    gameState.palavraOculta = [];
+    gameState.letrasTentadas = [];
+    gameState.vidas = 6;
+    
     if (gameState.modo === 'solo') {
-        gameState.palavraSecreta = getPalavraAleatoria();
-        gameState.palavraDefinida = true;
-        console.log(`[Forca] Modo Solo. Palavra: ${gameState.palavraSecreta}`);
+        // ... (a lógica do modo solo continua a mesma)
+    } else { // Multiplayer
+        const definidor = gameState.jogadores[0]; 
+        gameState.definidorDaPalavra = definidor.id;
+        gameState.vezDoJogador = 1; 
+        gameState.status = 'definindo_palavra';
 
-        await client.sendMessage(session.groupId, "🎉 *Jogo da Forca Começou!* 🎉");
+        await client.sendMessage(session.groupId, `Atenção, grupo! É a vez de *${definidor.name}* escolher a palavra secreta. Estou aguardando a palavra no privado... 🤫`);
+        
+        // --- ALTERAÇÃO NA INSTRUÇÃO DO PV ---
+        // Agora instrui o usuário a usar o comando !palavra
+        await client.sendMessage(definidor.id, `Sua vez de escolher a palavra para o jogo da forca!\nUse o comando \`!palavra <SUA_PALAVRA>\` aqui no nosso privado (sem acentos ou espaços).`);
+    }
+}
 
-        // --- NOVA LÓGICA HÍBRIDA ---
+/** Dispara a ação do bot de forma assíncrona */
+async function dispararAcaoBot(session, client) {
+    await new Promise(resolve => setTimeout(resolve, 1500)); // Pausa para o bot "pensar"
 
-        // 1. Envia o texto essencial IMEDIATAMENTE para feedback instantâneo.
-        const palavraDisplay = gameState.palavraSecreta.split('').map(() => '_').join(' ');
-        const textoInicial = `A palavra é:\n*${palavraDisplay}*\n\nPara jogar, digite \`!letra <letra>\``;
-        await client.sendMessage(session.groupId, textoInicial);
-
-        // 2. Envia a imagem da forca vazia como um complemento visual.
-        try {
-            const imagePath = path.join(__dirname, 'assets', 'forca_0.png');
-            const media = MessageMedia.fromFilePath(imagePath);
-            await client.sendMessage(session.groupId, media); // Envia a imagem sem legenda
-        } catch (error) {
-            console.error("Não foi possível enviar a imagem inicial da forca, o jogo continuará em modo texto.", error);
-        }
-
-    } else {
-        // A lógica do modo multiplayer continua a mesma
-        const delegator = gameState.jogadores[gameState.delegatorIndex];
-        await client.sendMessage(session.groupId, `Atenção, grupo! É a vez de *${delegator.name}* escolher a palavra secreta. Estou aguardando a palavra no privado... 🤫`);
-        await client.sendMessage(delegator.id, `Sua vez de escolher a palavra para o jogo da forca no grupo! Envie a palavra que você quer que o pessoal adivinhe aqui no nosso privado. Apenas a palavra, sem comandos.`);
+    const comandoBot = botPlayer.decideAction(session.gameState);
+    if (comandoBot) {
+        const fakeMessage = { author: botPlayer.BOT_ID, body: comandoBot, reply: () => {} };
+        await processarLetra(fakeMessage, session, client);
     }
 }
 
 /** Lida com a palavra secreta enviada no PV */
 async function definirPalavra(message, session, client) {
+    // ... (o início da função, com as validações, continua o mesmo)
+    const { from, body } = message;
     const { gameState } = session;
-    const delegator = gameState.jogadores[gameState.delegatorIndex];
 
-    if (message.from !== delegator.id || gameState.palavraDefinida) return;
+    if (from !== gameState.definidorDaPalavra) { return; }
+    if (gameState.status !== 'definindo_palavra') { return message.reply("❌ Você só pode definir a palavra no início da rodada."); }
 
-    const palavraLimpa = message.body.trim().toUpperCase().replace(/[^A-Z]/g, '');
-
-    if (palavraLimpa.length < 3) {
-        return message.reply("Palavra muito curta! Por favor, escolha uma palavra com pelo menos 3 letras.");
+    const palavra = body.split(' ').slice(1).join(' ').trim().toUpperCase();
+    
+    if (!palavra || palavra.length < 3 || palavra.length > 15 || !/^[A-Z]+$/.test(palavra)) {
+        return client.sendMessage(from, '❌ Comando inválido ou palavra inválida! Use: `!palavra SUA_PALAVRA` (apenas letras, sem espaços, de 3 a 15 caracteres).');
     }
 
-    gameState.palavraSecreta = palavraLimpa;
-    gameState.palavraDefinida = true;
-    console.log(`[Forca] ${delegator.name} definiu a palavra: ${gameState.palavraSecreta}`);
+    gameState.palavra = palavra.split('');
+    gameState.palavraOculta = Array(palavra.length).fill('_');
+    gameState.status = 'aguardando_palpite';
     
-    await message.reply(`✅ Palavra *"${gameState.palavraSecreta}"* definida! O jogo vai começar no grupo.`);
+    await client.sendMessage(from, `✅ Sua palavra foi definida, ela é: *${palavra}*`);
+
+    const proximoJogador = gameState.jogadores[gameState.vezDoJogador];
     
-    await client.sendMessage(session.groupId, `Palavra definida! Vamos começar!`);
-    const display = montarDisplay(gameState);
-    await client.sendMessage(session.groupId, montarDisplay(gameState));
+    // --- ALTERAÇÃO PARA USAR O DISPLAY COM IMAGEM ---
+    const { media, legenda } = montarDisplay(gameState);
+    const legendaComVez = `A palavra foi definida! *${proximoJogador.name}*, é sua vez de adivinhar.\n\n${legenda}`;
+    await client.sendMessage(session.groupId, media, { caption: legendaComVez });
+    // --- FIM DA ALTERAÇÃO ---
+
+    if (proximoJogador && proximoJogador.id === botPlayer.BOT_ID) {
+        await dispararAcaoBot(session, client);
+    }
 }
 
 /** Processa a tentativa de uma letra */
 async function processarLetra(message, session, client) {
+    // ... (o início da função, com as validações de vez, continua o mesmo)
     const { gameState } = session;
+    const playerId = message.author || message.from;
 
-    if (!gameState.palavraDefinida) {
-        return message.reply("Calma! O jogo ainda não começou. Estamos esperando a palavra secreta ser definida.");
-    }
-    if (gameState.modo === 'multiplayer' && message.author === gameState.jogadores[gameState.delegatorIndex].id) {
-        return message.reply("Você não pode chutar letras, você que escolheu a palavra!");
-    }
-
+    if (gameState.status !== 'aguardando_palpite') { return; }
+    if (playerId === gameState.definidorDaPalavra) { return message.reply("Você não pode chutar letras, você que escolheu a palavra!"); }
+    if (playerId !== gameState.jogadores[gameState.vezDoJogador].id) { return message.reply("Opa, não é a sua vez de jogar!"); }
+    
     const letra = message.body.split(' ')[1]?.toUpperCase();
 
-    if (!letra || letra.length !== 1 || !/^[A-Z]$/.test(letra)) {
-        return message.reply("Isso não parece uma letra válida. Tente `!letra A`.");
+    if (!letra || letra.length !== 1 || !/^[A-Z]$/.test(letra)) { return; }
+    if (gameState.letrasTentadas.includes(letra)) {
+        if(playerId !== botPlayer.BOT_ID) message.reply(`A letra *${letra}* já foi tentada!`);
+        return;
     }
+    gameState.letrasTentadas.push(letra);
 
-    if (gameState.letrasCorretas.includes(letra) || gameState.letrasErradas.includes(letra)) {
-        return message.reply(`A letra *${letra}* já foi tentada!`);
-    }
-
-    if (gameState.palavraSecreta.includes(letra)) {
-        gameState.letrasCorretas.push(letra);
+    // ... (a lógica de acerto, erro e verificação de vitória/derrota continua a mesma)
+    const acertou = gameState.palavra.includes(letra);
+    if (acertou) {
+        gameState.palavra.forEach((l, index) => { if (l === letra) gameState.palavraOculta[index] = letra; });
     } else {
-        gameState.letrasErradas.push(letra);
+        gameState.vidas--;
     }
 
-    const vitoria = gameState.palavraSecreta.split('').every(l => gameState.letrasCorretas.includes(l));
-    const derrota = gameState.letrasErradas.length >= gameState.tentativasMax;
+    const vitoria = !gameState.palavraOculta.includes('_');
+    const derrota = gameState.vidas <= 0;
 
+    // --- LÓGICA DE MENSAGEM FINAL ATUALIZADA ---
     if (vitoria || derrota) {
-        const autorDaJogada = session.players.find(p => p.id === message.author)?.name || 'Alguém';
+        const autorDaJogada = gameState.jogadores.find(p => p.id === playerId)?.name || 'Alguém';
         let mensagemFinal = vitoria
-            ? `🏆 *VITÓRIA DE ${autorDaJogada.toUpperCase()}!* Parabéns, vocês acertaram a palavra: *${gameState.palavraSecreta}*`
-            : `💀 *FIM DE JOGO!* Vocês foram enforcados! A palavra era: *${gameState.palavraSecreta}*`;
+            ? `🏆 *VITÓRIA DE ${autorDaJogada.toUpperCase()}!* Parabéns, acertaram a palavra!`
+            : `💀 *FIM DE JOGO!* Vocês foram enforcados!`;
         
         await client.sendMessage(session.groupId, mensagemFinal);
 
-        if (gameState.modo === 'multiplayer') {
-            gameState.delegatorIndex = (gameState.delegatorIndex + 1) % gameState.jogadores.length;
-            await client.sendMessage(session.groupId, `--- Preparando a próxima rodada ---`);
-            await iniciarRodada(session, client); // Reutiliza a função para iniciar a próxima rodada
-        } else {
-            sessionManager.endSession(session.groupId);
-        }
+        // Envia o tabuleiro final para mostrar a palavra
+        const displayFinal = montarDisplay(gameState);
+        const legendaFinal = `A palavra era: *${gameState.palavra.join('')}*`;
+        await client.sendMessage(session.groupId, displayFinal.media, { caption: legendaFinal });
+        
+        sessionManager.endSession(session.groupId);
         return;
     }
+    // --- FIM DA ATUALIZAÇÃO ---
+    
+    // Avança para o próximo jogador
+    gameState.vezDoJogador = (gameState.vezDoJogador + 1) % gameState.jogadores.length;
+    if (gameState.jogadores[gameState.vezDoJogador].id === gameState.definidorDaPalavra) {
+        gameState.vezDoJogador = (gameState.vezDoJogador + 1) % gameState.jogadores.length;
+    }
 
-    const novoDisplay = montarDisplay(gameState);
-    await client.sendMessage(session.groupId, novoDisplay.media, { caption: novoDisplay.legenda });
+    // --- ALTERAÇÃO PARA ENVIAR O DISPLAY COM IMAGEM ---
+    const proximoJogador = gameState.jogadores[gameState.vezDoJogador];
+    const { media, legenda } = montarDisplay(gameState);
+    const legendaComVez = `${legenda}\n\nÉ a vez de *${proximoJogador.name}*.`;
+    await client.sendMessage(session.groupId, media, { caption: legendaComVez });
+    // --- FIM DA ALTERAÇÃO ---
+
+    if (proximoJogador.id === botPlayer.BOT_ID) {
+        await dispararAcaoBot(session, client);
+    }
 }
 
-// Exporta todas as funções que serão usadas por outros arquivos
-module.exports = { prepararJogo, iniciarRodada, definirPalavra, processarLetra };
+// Exporta as funções
+module.exports = { prepararJogo, iniciarRodada, definirPalavra, processarLetra, montarDisplay };

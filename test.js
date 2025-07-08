@@ -1,138 +1,115 @@
-// C:\Users\Guilherme\bot-whatsapp\test.js
+// test.js - Teste de Estresse para Rotação e Saída de Jogadores na Forca
 
-const handleCommand = require('./controllers/commandHandler');
-const sessionManager = require('./sessions/sessionManager');
-const assert = require('assert');
+const handleCommand = require('./controllers/commandHandler.js');
+const sessionManager = require('./sessions/sessionManager.js');
 
-// ==================================================================
-// ==================== SETUP DE SIMULAÇÃO ==========================
-// ==================================================================
-
+// --- SIMULAÇÃO DO AMBIENTE DO BOT ---
 const mockClient = {
-    sendMessage: (targetId, message, options) => {
-        let cleanMessage = (typeof message === 'string') ? message : (options?.caption || `[Mídia: ${options?.caption || 'jogo da velha'}]`);
-        cleanMessage = cleanMessage.replace(/(\r\n|\n|\r)/gm, " ");
-        console.log(`[MSG para ${targetId.split('@')[0]}]: ${cleanMessage}`);
-    }
-};
-
-const GROUP_ID = 'teste_velha_infinito@g.us';
-const P1 = { id: 'player1@c.us', name: 'Guiga' };
-const P2 = { id: 'player2@c.us', name: 'Chico' };
-
-const PAUSA_ENTRE_ACOES = 500;
-
-const sendCommand = async (player, commandBody) => {
-    const authorId = player.id;
-    console.log(`\n> ${player.name} executa: "${commandBody}"`);
-    const mockMessage = {
-        from: GROUP_ID,
-        body: commandBody,
-        author: authorId,
-        reply: (text) => console.log(`[REPLY para ${player.name}]: ${text.split('\n')[0]}...`)
-    };
-    await handleCommand(mockMessage, mockClient);
-    await new Promise(resolve => setTimeout(resolve, PAUSA_ENTRE_ACOES));
-};
-
-const setupVelhaTest = async () => {
-    if (sessionManager.getSession(GROUP_ID)) {
-        sessionManager.endSession(GROUP_ID);
-    }
-    console.log(`\n=============================================================`);
-    console.log(`Ambiente de teste do Jogo da Velha limpo e pronto.`);
-    console.log(`=============================================================`);
-    
-    await sendCommand(P1, '!jogo velha');
-    await sendCommand(P1, `!entrar ${P1.name}`);
-    await sendCommand(P2, `!entrar ${P2.name}`);
-};
-
-// ==================================================================
-// =================== CENÁRIOS DE TESTE DA VELHA ===================
-// ==================================================================
-
-/**
- * CENÁRIO 1: Testa uma vitória normal, antes de o tabuleiro encher.
- */
-async function cenario_Velha_Vitoria_Rapida() {
-    console.log('\n--- 🧪 CENÁRIO 1: Jogo da Velha com vitória rápida ---');
-    await setupVelhaTest();
-    await sendCommand(P1, '!iniciar');
-
-    // Simulação de uma vitória em 5 jogadas
-    await sendCommand(P1, '!j a1'); // P1 joga
-    await sendCommand(P2, '!j b1'); // P2 joga
-    await sendCommand(P1, '!j a2'); // P1 joga
-    await sendCommand(P2, '!j b2'); // P2 joga
-    await sendCommand(P1, '!j a3'); // P1 joga e vence
-
-    const session = sessionManager.getSession(GROUP_ID);
-    assert.strictEqual(session, undefined, 'A sessão deveria ter sido encerrada após a vitória.');
-    
-    console.log('\n✅ SUCESSO: Cenário de vitória rápida concluído e sessão encerrada.');
-}
-
-/**
- * CENÁRIO 2: Testa a mecânica "infinita" após 9 jogadas.
- */
-async function cenario_Velha_Infinita() {
-    console.log('\n--- 🧪 CENÁRIO 2: Jogo da Velha com mecânica infinita ---');
-    await setupVelhaTest();
-    await sendCommand(P1, '!iniciar');
-
-    // NOVA sequência de jogadas para encher o tabuleiro sem um vencedor
-    console.log('\n--- Enchendo o tabuleiro ---');
-    await sendCommand(P1, '!j a1'); // 1. X
-    await sendCommand(P2, '!j b2'); // 2. O
-    await sendCommand(P1, '!j a2'); // 3. X
-    await sendCommand(P2, '!j a3'); // 4. O
-    await sendCommand(P1, '!j c1'); // 5. X
-    await sendCommand(P2, '!j b1'); // 6. O
-    await sendCommand(P1, '!j b3'); // 7. X
-    await sendCommand(P2, '!j c3'); // 8. O
-    await sendCommand(P1, '!j c2'); // 9. X - Tabuleiro cheio, sem vencedor
-
-    let session = sessionManager.getSession(GROUP_ID);
-    assert.notStrictEqual(session, undefined, 'A sessão não deveria ter terminado após 9 jogadas.');
-    assert.strictEqual(session.gameState.historicoDeJogadas.length, 9, 'Deveria haver 9 jogadas no histórico.');
-
-    // A 10ª jogada (de P2), que ativa a remoção da mais antiga (P1 em a1)
-    console.log('\n--- Ativando a mecânica infinita ---');
-    await sendCommand(P2, '!j a1'); // P2 joga no lugar que era do P1
-
-    session = sessionManager.getSession(GROUP_ID);
-    const jogadaMaisAntiga = session.gameState.historicoDeJogadas[0];
-    assert.strictEqual(jogadaMaisAntiga.posicao, 'b2', 'A jogada mais antiga agora deveria ser a de P2 em b2.');
-
-    // P1 joga na posição b1 (que era do P2 e será removida), completando a linha B e vencendo.
-    console.log('\n--- P1 joga para vencer ---');
-    await sendCommand(P1, '!j b1'); 
-    
-    session = sessionManager.getSession(GROUP_ID);
-    assert.strictEqual(session, undefined, 'A sessão deveria ter sido encerrada após a vitória no modo infinito.');
-
-    console.log('\n✅ SUCESSO: Cenário da mecânica infinita concluído com sucesso.');
-}
-
-// ==================================================================
-// =================== EXECUTOR DE TESTES ===========================
-// ==================================================================
-
-async function runTests() {
-    try {
-        await cenario_Velha_Vitoria_Rapida();
-        await cenario_Velha_Infinita();
-    } catch (error) {
-        console.error('\n\n❌ --- UM ERRO CRÍTICO OCORREU DURANTE OS TESTES --- ❌');
-        console.error(error);
-    } finally {
-        if (sessionManager.getSession(GROUP_ID)) {
-            sessionManager.endSession(GROUP_ID);
-            console.log('\nSessão de teste da Velha final limpa.');
+    sendMessage: async (chatId, content, options = {}) => {
+        const target = chatId.split('@')[0];
+        console.log(`\n+++++++++++++ MENSAGEM DO BOT PARA ${target} +++++++++++++`);
+        
+        if (typeof content === 'object' && content.mimetype && content.mimetype.startsWith('image/')) {
+            const caption = options.caption || "(sem legenda)";
+            console.log(`[IMAGEM ENVIADA] 🖼️`);
+            console.log(`Legenda: "${caption.replace(/\n/g, ' ')}"`);
+        } else {
+            console.log(content);
         }
-        console.log('\n\n--- ✅ TODOS OS TESTES DO JOGO DA VELHA FORAM CONCLUÍDOS ---');
+        console.log(`++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++\n`);
     }
+};
+
+function createMockMessage(body, author, fromGroup) {
+    return {
+        body,
+        author,
+        from: fromGroup,
+        reply: async (text) => await mockClient.sendMessage(fromGroup, text),
+    };
 }
 
+// --- O EXECUTOR DOS TESTES ---
+async function runTests() {
+    console.log('--- INICIANDO TESTE DE ESTRESSE DO JOGO DA FORCA ---\n');
+
+    const GROUP_ID = '123456789@g.us';
+    const USERS = Array.from({ length: 8 }, (_, i) => `${i + 1}11111111@c.us`);
+
+    const sendCommand = async (command, userId, isPrivate = false) => {
+        const from = isPrivate ? userId : GROUP_ID;
+        const message = createMockMessage(command, userId, from);
+        console.log(`\n>>> [TESTE] Usuário ${userId.split('@')[0]} enviou: "${command}" ${isPrivate ? 'no PV' : 'no Grupo'}`);
+        await handleCommand(message, mockClient);
+        await new Promise(res => setTimeout(res, 100)); 
+    };
+
+    // =================================================================
+    // CENÁRIO 1: JOGO DA FORCA (4 JOGADORES) COM SAÍDA
+    // =================================================================
+    console.log('\n\n--- CENÁRIO 1: FORCA COM 4 JOGADORES E SAÍDA DE JOGADOR ---');
+    await sendCommand('!jogo forca', USERS[0]);
+    await sendCommand('!entrar P1', USERS[0]);
+    await sendCommand('!entrar P2', USERS[1]);
+    await sendCommand('!entrar P3', USERS[2]);
+    await sendCommand('!entrar P4', USERS[3]);
+    await sendCommand('!iniciar', USERS[0]);
+    
+    // --- Rodada 1 (P1 define) ---
+    console.log('\n>>> [TESTE] Rodada 1: P1 define a palavra.');
+    await sendCommand('!palavra TESTE', USERS[0], true);
+    await sendCommand('!letra T', USERS[1]); // P2 joga
+    console.log('\n>>> [TESTE] P3 vai sair do jogo no meio da rodada.');
+    await sendCommand('!sair', USERS[2]); // P3 sai do jogo
+    await sendCommand('!letra E', USERS[3]); // P4 joga (o bot deve pular o P3)
+    await sendCommand('!letra S', USERS[1]); // P2 joga e ganha a rodada
+
+    // --- Rodada 2 (P2 define) ---
+    console.log('\n>>> [TESTE] Rodada 2: A vez de definir deve passar para P2.');
+    await sendCommand('!palavra VITORIA', USERS[1], true);
+    console.log('\n>>> [TESTE] O próximo a jogar deve ser P4, pois P3 saiu e P1 já foi.');
+    await sendCommand('!letra A', USERS[3]); // P4 joga
+    await sendCommand('!letra I', USERS[0]); // P1 joga
+
+    console.log('\n\n--- CENÁRIO 1 FINALIZADO ---');
+    await sendCommand('!sair', USERS[0]); // Encerrando o jogo para o próximo cenário
+
+
+    // =================================================================
+    // CENÁRIO 2: JOGO DA FORCA (8 JOGADORES) TESTANDO A ROTAÇÃO COMPLETA
+    // =================================================================
+    console.log('\n\n--- CENÁRIO 2: FORCA COM 8 JOGADORES E ROTAÇÃO ---');
+    if (sessionManager.getSession(GROUP_ID)) {
+        console.error('!!! FALHA: Sessão anterior não foi encerrada corretamente !!!');
+        return;
+    }
+    await sendCommand('!jogo forca', USERS[0]);
+    for (let i = 0; i < 8; i++) {
+        await sendCommand(`!entrar Player${i + 1}`, USERS[i]);
+    }
+    await sendCommand('!iniciar', USERS[0]);
+
+    // --- Rodada 1 (Player1 define) ---
+    console.log('\n>>> [TESTE] Rodada 1/8: Player1 define a palavra.');
+    await sendCommand('!palavra JOGO', USERS[0], true);
+    await sendCommand('!letra O', USERS[1]); // Player2 acerta e ganha
+
+    // --- Rodada 2 (Player2 define) ---
+    console.log('\n>>> [TESTE] Rodada 2/8: Vez de Player2 definir.');
+    await sendCommand('!palavra BOT', USERS[1], true);
+    await sendCommand('!letra B', USERS[2]); // Player3 acerta e ganha
+
+    // --- Rodada 3 (Player3 define) ---
+    console.log('\n>>> [TESTE] Rodada 3/8: Vez de Player3 definir.');
+    await sendCommand('!palavra TESTE', USERS[2], true);
+    console.log('\n>>> [TESTE] Player5 vai sair do jogo.');
+    await sendCommand('!sair', USERS[4]); // Player5 sai
+    await sendCommand('!letra T', USERS[3]); // Player4 joga
+
+
+    console.log('\n\n--- SUÍTE DE TESTES FINALIZADA ---');
+    console.log('VERIFIQUE O LOG ACIMA PARA CONFIRMAR SE A ROTAÇÃO DE JOGADORES E A SAÍDA FUNCIONARAM.');
+}
+
+// Executa os testes
 runTests();
