@@ -5,6 +5,8 @@ const truco = require('./Truco/truco'); // Importamos o módulo principal do Tru
 const botPlayer = require('./Poker/botPlayer');
 const sessionManager = require('../sessions/sessionManager');
 const trucoBot = require('./Truco/botPlayer');
+const forca = require('./Forca/forca');
+const velha = require('./Velha/velha')
 
 // --- LÓGICA PRINCIPAL DO LOBBY ---
 
@@ -59,21 +61,24 @@ async function handleLobbyCommand(message, session, client) {
         await handlePokerLobby(message, session, client);
     } else if (session.game === 'truco') {
         await handleTrucoLobby(message, session, client);
+    } else if (session.game === 'forca') {
+        await handlePokerLobby(message, session, client);
+    } else if (session.game === 'velha') {
+        await handlePokerLobby(message, session, client);
     }
 }
 
-/**
- * Gera a mensagem de status do lobby (seja Poker ou Truco).
- * @param {object} session - A sessão do jogo.
- * @returns {string} A mensagem formatada para o lobby.
- */
 function gerarMensagemLobby(session) {
     if (session.game === 'poker') {
         return gerarMensagemLobbyPoker(session);
     } else if (session.game === 'truco') {
         return gerarMensagemLobbyTruco(session);
+    } else if (session.game === 'forca') {
+        return gerarMensagemLobbyForca(session);
+    } else if (session.game === 'velha') { 
+        return gerarMensagemLobbyVelha(session);
     }
-    return 'Lobby em modo desconhecido.'; // Fallback
+    return 'Lobby em modo desconhecido.';
 }
 
 // --- LÓGICAS ESPECÍFICAS PARA CADA JOGO ---
@@ -120,20 +125,20 @@ async function handlePokerLobby(message, session, client) {
 async function adicionarJogadorPoker(message, session, client) {
     const { author, body } = message;
     const playerId = author || message.from;
-    const MAX_PLAYERS = 8;
+    // Limite dinâmico: 2 para a velha, 8 para os outros jogos
+    const MAX_PLAYERS = session.game === 'velha' ? 2 : 8;
 
     if (session.players.length >= MAX_PLAYERS) {
-        return message.reply('❌ A mesa está cheia!');
+        return message.reply('❌ A sala está cheia!');
     }
+    // O resto da função continua exatamente igual...
     if (session.players.some(p => p.id === playerId)) {
         return message.reply('✔️ Você já está na mesa.');
     }
-
     const playerName = body.split(' ').slice(1).join(' ').trim();
     if (!playerName) {
         return message.reply('⚠️ Por favor, digite seu nome. Ex: `!entrar João`');
     }
-
     session.players.push({ id: playerId, name: playerName });
     sessionManager.mapPlayerToGroup(playerId, session.groupId);
     const lobbyMessage = gerarMensagemLobby(session);
@@ -315,6 +320,131 @@ async function iniciarJogoTruco(message, session, client) {
 }
 
 // =================================================================
+// FORCA
+// =================================================================
+
+function gerarMensagemLobbyForca(session) {
+    const MAX_PLAYERS = 8;
+    let playersList = '';
+    for (let i = 0; i < MAX_PLAYERS; i++) {
+        const player = session.players[i];
+        playersList += `${i + 1}. ${player ? player.name : '<vazio>'}\n`;
+    }
+
+    let comandos = '[ !entrar <seu_nome> ]  [ !ajuda ]';
+    if (session.players.length >= 1) {
+        comandos += '  *[ !iniciar ]*';
+    }
+
+    let lobbyMessage = `*Sala de Jogo da Forca Criada!* 💀\n\n*Jogadores na Fila:*\n${playersList}\n---\n${comandos}`;
+
+    if (session.players.length === 1) {
+        lobbyMessage += '\n\n*Aviso:* Se iniciar agora, você jogará sozinho contra o Bot!';
+    } else if (session.players.length > 1) {
+        lobbyMessage += `\n\n*Aviso:* Se iniciar agora, o jogo será em grupo e *${session.players[0].name}* escolherá a primeira palavra!`;
+    }
+
+    return lobbyMessage;
+}
+
+// Adicione esta nova função para iniciar o jogo
+async function iniciarJogoForca(message, session, client) {
+    const playerId = message.author || message.from;
+
+    if (session.players.length > 0 && session.players[0].id !== playerId) {
+        return message.reply('Apenas o primeiro jogador que entrou na sala pode iniciar o jogo.');
+    }
+    if (session.players.length === 0) {
+        return client.sendMessage(session.groupId, '⚠️ Não é possível iniciar um jogo sem jogadores!');
+    }
+
+    session.status = 'em_jogo';
+    forca.prepararJogo(session); // Prepara o estado do jogo
+    await client.sendMessage(session.groupId, '💀 O *Jogo da Forca* está começando!');
+    await forca.iniciarRodada(session, client); // Inicia a primeira rodada
+}
+
+async function handlePokerLobby(message, session, client) {
+    const command = message.body.split(' ')[0].toLowerCase();
+    switch (command) {
+        case '!entrar':
+            await adicionarJogadorPoker(message, session, client);
+            break;
+        case '!iniciar':
+            // Direciona para o iniciador correto
+            if (session.game === 'poker') {
+                await iniciarJogoPoker(message, session, client);
+            } else if (session.game === 'forca') {
+                await iniciarJogoForca(message, session, client);
+            } else if (session.game === 'velha') { // <<< Adicione este else if
+                await iniciarJogoVelha(message, session, client);
+            }
+            break;
+    }
+}
+
+// =================================================================
+// VELHA
+// =================================================================
+
+
+function gerarMensagemLobbyVelha(session) {
+    let playersList = '1. <vazio>\n2. <vazio>\n';
+    if (session.players.length > 0) {
+        playersList = `1. ${session.players[0].name}\n`;
+        playersList += `2. ${session.players[1] ? session.players[1].name : '<vazio>'}\n`;
+    }
+
+    let comandos = '[ !entrar <seu_nome> ]  [ !ajuda ]';
+    
+    // CORREÇÃO: Mostra o botão de iniciar com 1 ou 2 jogadores
+    if (session.players.length >= 1) {
+        comandos += '  *[ !iniciar ]*';
+    }
+
+    let lobbyMessage = `*Sala de Jogo da Velha Infinito Criada!* ♾️\n\n*Jogadores (2 no total):*\n${playersList}\n---\n${comandos}`;
+    
+    // NOVO: Adiciona o aviso sobre jogar contra o bot
+    if (session.players.length === 1) {
+        const botPlayer = require('./Velha/botPlayer');
+        lobbyMessage += `\n\n*Aviso:* Se iniciar agora, você jogará contra o *BOT Velhaco*! 🤖`;
+    }
+    
+    return lobbyMessage;
+}
+
+async function iniciarJogoVelha(message, session, client) {
+    const botPlayer = require('./Velha/botPlayer'); // Importa para ter o ID do bot
+
+    // LÓGICA PARA ADICIONAR O BOT QUANDO JOGA SOZINHO
+    if (session.players.length === 1) {
+        const bot = botPlayer.createBotPlayer();
+        session.players.push(bot);
+        await client.sendMessage(session.groupId, `🤖 ${bot.name} entrou para jogar contra você!`);
+    }
+
+    // Esta verificação agora funciona, pois o bot foi adicionado antes
+    if (session.players.length !== 2) {
+        return message.reply('⚠️ É preciso exatamente 2 jogadores para iniciar o Jogo da Velha.');
+    }
+
+    session.status = 'em_jogo';
+    const jogoDaVelha = require('./Velha/velha');
+    jogoDaVelha.prepararJogo(session);
+
+    const primeiroJogador = session.players[0];
+    const legenda = `♾️ O *Jogo da Velha Infinito* está começando!\n\nÉ a vez de *${primeiroJogador.name}* (❌). Use \`!jogar <posição>\`, ex: \`!jogar a1\`.`;
+    
+    const displayInicial = await jogoDaVelha.montarDisplay(session.gameState);
+    await client.sendMessage(session.groupId, displayInicial, { caption: legenda });
+
+    // NOVO: Verifica se o primeiro a jogar é o bot e dispara a ação dele
+    if (primeiroJogador.id === botPlayer.BOT_ID) {
+        await jogoDaVelha.dispararAcaoBot(session, client);
+    }
+}
+
+// =================================================================
 // AJUDA
 // =================================================================
 
@@ -332,6 +462,11 @@ async function enviarAjudaLobby(session, message) {
                 `- !entrar <seu_nome> <blue ou red> - Entra em um time específico\n` +
                 `- !iniciar - Começa o jogo (requer 1x1 ou 2x2)\n` +
                 `- !sair - Fecha o lobby`;
+    } else if (session.game === 'velha') {
+        ajudaMsg = `📖 *Comandos do Lobby do Jogo da Velha:*\n` +
+                   `- !entrar <seu_nome> - Entra na partida (limite de 2 jogadores)\n` +
+                   `- !iniciar - Começa o jogo com 2 jogadores\n` +
+                   `- !sair - Fecha o lobby`;
     }
     await message.reply(ajudaMsg);
 }

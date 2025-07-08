@@ -4,159 +4,132 @@ const sessionManager = require('../sessions/sessionManager');
 const lobby = require('../games/lobby');
 const pokerActions = require('../games/Poker/playerActions');
 const trucoActions = require('../games/Truco/playerActions');
+const forcaActions = require('../games/Forca/playerActions');
+const velhaActions = require('../games/Velha/playerActions');
+const riotService = require('../services/riotService');
+
 
 async function handleCommand(message, client) {
     try {
         const { from, body } = message;
+        const isGroup = from.endsWith('@g.us');
+
+        // Lógica para tratar palavras secretas da Forca no PV
+        if (!isGroup && !body.startsWith('!')) {
+            const groupId = sessionManager.getGroupFromPlayer(from);
+            if (groupId) {
+                const session = sessionManager.getSession(groupId);
+                if (session && session.game === 'forca' && session.status === 'em_jogo') {
+                    const forca = require('../games/Forca/forca');
+                    await forca.definirPalavra(message, session, client);
+                    return;
+                }
+            }
+        }
+
         const commandArgs = body.split(' ');
         const command = commandArgs[0].toLowerCase();
 
+        // COMANDOS DE DEBUG
         if (command.startsWith('!debug-')) {
-            const session = sessionManager.getSession(from);
-            if (!session) return console.log('[DEBUG] Sessão não encontrada para comando de debug.');
-
-            else if (command === '!debug-setvira') {
-                const viraCard = commandArgs[1];
-                if (viraCard && session.gameState) {
-                    session.gameState.vira = viraCard;
-                    session.gameState.manilhaValor = require('../games/Truco/truco').getManilhaValor(viraCard);
-                    console.log(`[DEBUG] Vira definido para: ${viraCard} | Manilha agora é: ${session.gameState.manilhaValor}`);
-                }
-            }
-
-            if (command === '!debug-sethand') {
-                const playerId = commandArgs[1];
-                const cards = commandArgs.slice(2); // Pega todas as cartas
-                const player = session.gameState.jogadores.find(p => p.id === playerId);
-                if (player) {
-                    player.mao = [null, null, null]; // Limpa a mão primeiro
-                    cards.forEach((card, i) => player.mao[i] = card);
-                    console.log(`[DEBUG] Mão de ${player.name} definida para: ${cards.join(', ')}`);
-                }
-            }
-            return; // Interrompe a execução para não processar como um comando normal
+            // ... (A sua lógica de debug aqui)
+            return;
         }
 
-        // 1. Comandos Globais (funcionam a qualquer momento, com ou sem jogo)
+        // =======================================================
+        // SEÇÃO DE COMANDOS GLOBAIS CORRIGIDA
+        // =======================================================
+
         if (command === '!botzap') {
             const botZapMessage = `Olá! Eu sou o *BotZap* 👾, o bot especializado em *muita diversão nesse ZAP*🤣👌🏽🤪👍🏽!\n\n` +
                                   `Minha missão é trazer a _verdadeira_ diversão do zap com jogos & funcionalidades para o seu grupo.\n\n` +
-                                  `*Jogos Disponíveis:*\n` +
-                                  `• *Poker* Texas Hold'em\n` +
-                                  `• *Truco* Paulista\n\n` +
-                                  `---\n\n` +
                                   `*Como começar um jogo?*\n` +
-                                  `É fácil! Digite \`[ !jogo ]\` seguido do nome do jogo.\n\n` +
-                                  `*Exemplo:* \`!jogo poker\`\n\n` +
+                                  `É fácil! Digite \`!jogo <nome do jogo>\`\n\n` +
+                                  `*Jogos Disponíveis:*\n` +
+                                  `• Poker\n` +
+                                  `• Truco\n` +
+                                  `• Forca\n` +
+                                  `• Jogo da Velha\n\n` +
                                   `---\n\n` +
-                                  `*Comandos Gerais:*\n` +
-                                  `• \`!ajuda\` - Mostra os comandos disponíveis.\n` +
+                                  `*Outros comandos:*\n` +
+                                  `• \`!figurinha\` - Responda a uma imagem para criar um sticker.\n` +
                                   `• \`!sair\` - Encerra um jogo ou lobby em andamento.\n\n` +
-                                  `Vamos jogar? 🎉`;
+                                  `Vamos começar? 🎉`;
             await message.reply(botZapMessage);
             return;
         }
 
         if (command === '!figurinha' || command === '!sticker') {
-            // Verifica se a mensagem é uma resposta a outra
             if (message.hasQuotedMsg) {
                 const quotedMsg = await message.getQuotedMessage();
-
-                // Verifica se a mensagem respondida tem mídia (imagem/vídeo)
                 if (quotedMsg.hasMedia) {
                     await message.reply("Criando sua figurinha, um momento... 🎨");
-
                     try {
-                        // Baixa a mídia da mensagem respondida
                         const media = await quotedMsg.downloadMedia();
-
-                        // Envia a mídia de volta como uma figurinha
-                        await client.sendMessage(from, media, {
-                            sendMediaAsSticker: true,
-                            stickerAuthor: "BotZap 🤖", // Opcional: autor da figurinha
-                            stickerName: "Criado pelo Bot"   // Opcional: nome do pacote
-                        });
-
+                        await client.sendMessage(from, media, { sendMediaAsSticker: true, stickerAuthor: "BotZap 🤖", stickerName: "Criado pelo Bot" });
                     } catch (error) {
-                        console.error("Erro ao criar figurinha:", error);
-                        await message.reply("❌ Ih, deu erro! Não consegui fazer a figurinha. Tente com outra imagem ou vídeo curto.");
+                        await message.reply("❌ Ih, deu erro! Tente com outra imagem ou vídeo curto.");
                     }
-
                 } else {
                     await message.reply("Você precisa responder a uma imagem ou vídeo para eu transformar em figurinha!");
                 }
             } else {
                 await message.reply("Para criar uma figurinha, responda a uma imagem com o comando `!figurinha`.");
             }
-            return; // Encerra o processamento do comando aqui
+            return;
         }
 
-        let session;
-        const isGroup = from.endsWith('@g.us');
+        if (command === '!elo') {
+            // Pega todo o texto após "!elo" como o Riot ID completo
+            const riotIdCompleto = commandArgs.slice(1).join(' ').trim();
 
-        if (isGroup) {
-            // Se a mensagem veio de um grupo, a sessão é a do grupo.
-            session = sessionManager.getSession(from);
-        } else {
-            // Se a mensagem veio do privado, busca o grupo pelo ID do jogador.
-            const groupId = sessionManager.getGroupFromPlayer(from);
-            if (groupId) {
-                session = sessionManager.getSession(groupId);
-            }
-        }
-
-        // 2. Comando para CRIAR um novo jogo
-        if (command === '!jogo') {
-            if (session) {
-                await message.reply('Já existe uma mesa em andamento. Use `!fimjogo` para encerrar.');
-                return;
+            // Valida se o formato inclui o '#'
+            if (!riotIdCompleto || !riotIdCompleto.includes('#')) {
+                return message.reply("Formato inválido! Use: `!elo NomeDeJogo#TAG`\nExemplo: `!elo Faker#KR1`");
             }
 
-            const gameName = commandArgs[1]?.toLowerCase();
-            switch (gameName) {
-                case 'poker':
-                    const newPokerSession = sessionManager.createSession(from, 'poker');
-                    await lobby.criarLobby(newPokerSession, client);
-                    break;
-                case 'truco':
-                    const newTrucoSession = sessionManager.createSession(from, 'truco');
-                    await lobby.criarLobby(newTrucoSession, client);
-                    break;
-                default:
-                    await message.reply('Jogo não reconhecido. Use: `!jogo poker` ou `!jogo truco`.');
-                    break;
+            // Separa o nome e a tag usando o '#' como divisor
+            const [gameName, tagLine] = riotIdCompleto.split('#');
+
+            console.log(`[DEBUG] Nome de Jogo: "${gameName}", Tagline: "${tagLine}"`);
+
+            // Valida se ambos (nome e tag) existem após a separação
+            if (!gameName || !tagLine) {
+                return message.reply("Formato inválido! Você precisa incluir o nome e a tag. Exemplo: `!elo Faker#KR1`");
             }
+
+            await message.reply(`Buscando o elo de *${gameName}#${tagLine}*... 🔎`);
+            
+            // Envia o nome e a tag como duas variáveis separadas, como a função espera
+            const eloInfo = await riotService.buscarElo(gameName, tagLine);
+            
+            await message.reply(eloInfo);
             return;
         }
         
-        // Se chegou aqui, o comando é para um jogo existente. Se não há sessão, avisa o usuário.
+        // =======================================================
+        // O restante do código para lidar com sessões de jogo
+        // =======================================================
+
+        let session = isGroup ? sessionManager.getSession(from) : sessionManager.getSession(sessionManager.getGroupFromPlayer(from));
+        
+        if (command === '!jogo') {
+            // ... (seu código para !jogo continua aqui)
+        }
+        
         if (!session) {
             if (command.startsWith('!')) {
-                 await message.reply('Nenhum jogo em andamento. Para começar, digite `!botzap`.');
+                 await message.reply('Nenhum jogo em andamento. Para começar, digite:\n `!jogo <nome do jogo>`.');
             }
             return;
         }
 
-        // 3. Comandos DENTRO de uma sessão ativa (Lobby ou Em Jogo)
         if (session.status === 'lobby') {
-            await lobby.handleLobbyCommand(message, session, client);
-            return;
+            // ... (seu código para lobby continua aqui)
         }
 
         if (session.status === 'em_jogo') {
-            // Direciona o comando para o handler do jogo correto
-            switch (session.game) {
-                case 'poker':
-                    await pokerActions.handleGameCommand(message, session, client);
-                    break;
-                case 'truco':
-                    await trucoActions.handleGameCommand(message, session, client);
-                    break;
-                default:
-                    await message.reply('Erro: Jogo em andamento não reconhecido na sessão.');
-                    break;
-            }
-            return;
+            // ... (seu código para jogo em andamento continua aqui)
         }
 
     } catch (error) {
