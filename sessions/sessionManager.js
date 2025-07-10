@@ -99,6 +99,7 @@ module.exports = {
     endSession,
     mapPlayerToGroup,
     getGroupFromPlayer,
+    unmapPlayersInGroup,
     notificarEstado,
     notificarStatusCompleto
 };

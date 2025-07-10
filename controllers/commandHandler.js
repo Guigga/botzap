@@ -1,5 +1,7 @@
 // C:\Users\Guilherme\bot-whatsapp\controllers\commandHandler.js
 
+const logger = require('../utils/logger');
+const config = require('../config.json');
 const sessionManager = require('../sessions/sessionManager');
 const lobby = require('../games/lobby');
 const pokerActions = require('../games/Poker/playerActions');
@@ -10,9 +12,18 @@ const handleMusica = require('./musicaHandler');
 const JOGOS_VALIDOS = ['poker', 'truco', 'forca', 'velha'];
 
 async function handleCommand(message, client) {
-    try {
-        const { from, body } = message;
-        const isGroup = from.endsWith('@g.us');
+    try {
+        const { from, body } = message;
+        logger.log(message, `Comando recebido: ${body}`);
+        console.log(`[ID Hunter] Mensagem recebida do ID: ${from}`);
+        const isGroup = from.endsWith('@g.us');
+
+        // --- NOVO BLOCO DE FILTRAGEM DE GRUPO ---
+        if (config.enableGroupFilter && isGroup && !config.allowedGroupIds.includes(from)) {
+            // O logger vai buscar o nome do contato e do chat automaticamente!
+            logger.log(message, 'Comando ignorado: grupo não está na whitelist.');
+            return;
+        }
 
         // --- BLOCO DE DEBUG PARA O JOGO DA FORCA NO PV ---
         
@@ -39,6 +50,19 @@ async function handleCommand(message, client) {
             await message.reply(botZapMessage);
             return;
         }
+
+        if (command === '!id') {
+            await message.reply(`O ID deste chat é:\n\`${from}\``);
+            return;
+        }
+
+        if (command === '!debug') {
+            console.log('===== OBJETO MESSAGE COMPLETO =====');
+            console.log(message);
+            console.log('=================================');
+            await message.reply('O objeto da mensagem foi impresso no console do bot. 😉');
+            return;
+        }
 
         if (command === '!figurinha' || command === '!sticker') {
             if (message.hasQuotedMsg) {
@@ -99,7 +123,7 @@ async function handleCommand(message, client) {
         
         if (!session) {
             if (command.startsWith('!')) {
-                 await message.reply('Nenhum jogo em andamento. Para começar, digite:\n`!jogo <nome do jogo>`');
+                 await message.reply('Nenhum jogo em andamento. Para começar, digite:\n`!jogo <nome do jogo>\n Para mais informações digite:`!botzap` `');
             }
             return;
         }

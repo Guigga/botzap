@@ -28,44 +28,44 @@ function montarDisplay(gameState) {
 
 /** Prepara o estado inicial do jogo da Forca */
 function prepararJogo(session) {
-    console.log(`[Forca] Jogo preparado para ${session.groupId}`);
-    session.gameState = {
-        jogadores: session.players.map(p => ({ ...p })),
-        definidorDaPalavra: null,
-        vezDoJogador: 0,
-        palavra: [],
-        palavraOculta: [],
-        letrasTentadas: [],
-        vidas: 6,
-        status: 'preparando' // Status: preparando, definindo_palavra, aguardando_palpite
-    };
-    session.status = 'em_jogo';
+    console.log(`[Forca] Jogo preparado para ${session.groupId}`);
+    session.gameState = {
+        jogadores: session.players.map(p => ({ ...p })),
+        definidorDaPalavra: null,
+        definidorIndex: 0, // <<< ADICIONADO: Começa com o primeiro jogador (índice 0)
+        vezDoJogador: 0,
+        palavra: [],
+        palavraOculta: [],
+        letrasTentadas: [],
+        vidas: 6,
+        status: 'preparando'
+    };
+    session.status = 'em_jogo';
 }
 
 /** Inicia uma nova rodada (ou a primeira) */
 async function iniciarRodada(session, client) {
-    const { gameState } = session;
-    
-    // ... (a lógica de reset da rodada continua a mesma)
-    gameState.palavra = [];
-    gameState.palavraOculta = [];
-    gameState.letrasTentadas = [];
-    gameState.vidas = 6;
-    
-    if (gameState.modo === 'solo') {
-        // ... (a lógica do modo solo continua a mesma)
-    } else { // Multiplayer
-        const definidor = gameState.jogadores[0]; 
-        gameState.definidorDaPalavra = definidor.id;
-        gameState.vezDoJogador = 1; 
-        gameState.status = 'definindo_palavra';
+    const { gameState } = session;
+    
+    // Reseta o estado da rodada
+    gameState.palavra = [];
+    gameState.palavraOculta = [];
+    gameState.letrasTentadas = [];
+    gameState.vidas = 6;
+    
+    if (gameState.modo === 'solo') {
+        // Lógica do modo solo permanece a mesma
+    } else { // Multiplayer
+        // Usa o índice para pegar o definidor da vez
+        const definidor = gameState.jogadores[gameState.definidorIndex]; 
+        gameState.definidorDaPalavra = definidor.id;
+        // A vez de jogar começa com o jogador seguinte ao definidor
+        gameState.vezDoJogador = (gameState.definidorIndex + 1) % gameState.jogadores.length; 
+        gameState.status = 'definindo_palavra';
 
-        await client.sendMessage(session.groupId, `Atenção, grupo! É a vez de *${definidor.name}* escolher a palavra secreta. Estou aguardando a palavra no privado... 🤫`);
-        
-        // --- ALTERAÇÃO NA INSTRUÇÃO DO PV ---
-        // Agora instrui o usuário a usar o comando !palavra
-        await client.sendMessage(definidor.id, `Sua vez de escolher a palavra para o jogo da forca!\nUse o comando \`!palavra <SUA_PALAVRA>\` aqui no nosso privado (sem acentos ou espaços).`);
-    }
+        await client.sendMessage(session.groupId, `Nova rodada! Agora é a vez de *${definidor.name}* escolher a palavra secreta. Estou aguardando no privado... 🤫`);
+        await client.sendMessage(definidor.id, `Sua vez de escolher a palavra para o jogo da forca!\nUse o comando \`!palavra <SUA_PALAVRA>\` aqui no nosso privado (sem acentos ou espaços).`);
+    }
 }
 
 /** Dispara a ação do bot de forma assíncrona */
@@ -145,21 +145,35 @@ async function processarLetra(message, session, client) {
 
     // --- LÓGICA DE MENSAGEM FINAL ATUALIZADA ---
     if (vitoria || derrota) {
-        const autorDaJogada = gameState.jogadores.find(p => p.id === playerId)?.name || 'Alguém';
-        let mensagemFinal = vitoria
-            ? `🏆 *VITÓRIA DE ${autorDaJogada.toUpperCase()}!* Parabéns, acertaram a palavra!`
-            : `💀 *FIM DE JOGO!* Vocês foram enforcados!`;
-        
-        await client.sendMessage(session.groupId, mensagemFinal);
+        const autorDaJogada = gameState.jogadores.find(p => p.id === playerId)?.name || 'Alguém';
+        let mensagemRodada = vitoria
+            ? `🏆 Rodada vencida por *${autorDaJogada.toUpperCase()}*!`
+            : `💀 Fim da rodada! Vocês não adivinharam.`;
+        
+        await client.sendMessage(session.groupId, mensagemRodada);
 
-        // Envia o tabuleiro final para mostrar a palavra
-        const displayFinal = montarDisplay(gameState);
-        const legendaFinal = `A palavra era: *${gameState.palavra.join('')}*`;
-        await client.sendMessage(session.groupId, displayFinal.media, { caption: legendaFinal });
+        const displayFinal = montarDisplay(gameState);
+        const legendaFinal = `A palavra era: *${gameState.palavra.join('')}*`;
+        await client.sendMessage(session.groupId, displayFinal.media, { caption: legendaFinal });
         
-        sessionManager.endSession(session.groupId);
-        return;
-    }
+        // Incrementa o índice para a próxima rodada
+        gameState.definidorIndex++; 
+
+        // Verifica se todos já definiram uma palavra
+        if (gameState.definidorIndex >= gameState.jogadores.length) {
+            await client.sendMessage(session.groupId, '🏁 *FIM DE JOGO!* Todos os jogadores já definiram uma palavra. Obrigado por jogar!');
+            sessionManager.endSession(session.groupId);
+            return;
+        } else {
+            // Prepara para a próxima rodada
+            await client.sendMessage(session.groupId, 'Próxima rodada em 5 segundos...');
+            // Usamos um timeout para dar um respiro entre as rodadas
+            setTimeout(() => {
+                iniciarRodada(session, client);
+            }, 5000);
+            return;
+        }
+    }
     // --- FIM DA ATUALIZAÇÃO ---
     
     // Avança para o próximo jogador
