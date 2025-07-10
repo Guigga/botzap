@@ -1,13 +1,15 @@
 // C:\Users\Guilherme\bot-whatsapp\games\lobby.js
 
 const poker = require('./Poker/poker');
-const truco = require('./Truco/truco'); // Importamos o módulo principal do Truco
+const truco = require('./Truco/truco');
 const botPlayer = require('./Poker/botPlayer');
 const sessionManager = require('../sessions/sessionManager');
 const trucoBot = require('./Truco/botPlayer');
 const forca = require('./Forca/forca');
 const velha = require('./Velha/velha')
 const forcaBot = require('./Forca/botPlayer');
+const uno = require('./Uno/uno');
+const unoBot = require('./Uno/botPlayer');
 
 // --- LÓGICA PRINCIPAL DO LOBBY ---
 
@@ -73,7 +75,9 @@ async function handleLobbyCommand(message, session, client) {
         await handlePokerLobby(message, session, client);
     } else if (session.game === 'velha') {
         await handlePokerLobby(message, session, client);
-    }
+    } else if (session.game === 'uno') {
+        await handlePokerLobby(message, session, client);
+    }
 }
 
 function gerarMensagemLobby(session) {
@@ -85,6 +89,8 @@ function gerarMensagemLobby(session) {
         return gerarMensagemLobbyForca(session);
     } else if (session.game === 'velha') { 
         return gerarMensagemLobbyVelha(session);
+    } else if (session.game === 'uno') { 
+        return gerarMensagemLobbyUno(session);
     }
     return 'Lobby em modo desconhecido.';
 }
@@ -353,6 +359,28 @@ async function iniciarJogoTruco(message, session, client) {
 // FORCA
 // =================================================================
 
+async function iniciarJogoUno(message, session, client) {
+    const playerId = message.author || message.from;
+
+    if (session.players.length > 0 && session.players[0].id !== playerId) {
+        return message.reply('Apenas o primeiro jogador que entrou na mesa pode iniciar o jogo.');
+    }
+    if (session.players.length === 0) {
+        return client.sendMessage(session.groupId, '⚠️ Não é possível iniciar um jogo sem jogadores!');
+    }
+
+    // Se apenas 1 jogador iniciar, adiciona o bot para competir.
+    if (session.players.length === 1) {
+        const bot = unoBot.createBotPlayer();
+        session.players.push(bot);
+        await client.sendMessage(session.groupId, `🤖 ${bot.name} entrou para completar a mesa.`);
+    }
+
+    uno.prepararJogo(session); // Prepara o estado do jogo UNO
+    await client.sendMessage(session.groupId, '🃏 O jogo de *UNO* está começando! Boa sorte a todos.');
+    await uno.iniciarPartida(session, client); // Inicia a primeira rodada do UNO
+}
+
 function gerarMensagemLobbyForca(session) {
     const MAX_PLAYERS = 8;
     let playersList = '';
@@ -417,7 +445,9 @@ async function handlePokerLobby(message, session, client) {
                 await iniciarJogoForca(message, session, client);
             } else if (session.game === 'velha') { // <<< Adicione este else if
                 await iniciarJogoVelha(message, session, client);
-            }
+            } else if (session.game === 'uno') { // <<< ADICIONE ESTA LINHA
+                await iniciarJogoUno(message, session, client);
+            }
             break;
     }
 }
@@ -482,6 +512,32 @@ async function iniciarJogoVelha(message, session, client) {
 }
 
 // =================================================================
+// UNO
+// =================================================================
+
+function gerarMensagemLobbyUno(session) {
+    const MAX_PLAYERS = 8;
+    let playersList = '';
+    for (let i = 0; i < MAX_PLAYERS; i++) {
+        const player = session.players[i];
+        playersList += `${i + 1}. ${player ? player.name : '<vazio>'}\n`;
+    }
+
+    let comandos = '[ !entrar <seu_nome> ]  [ !ajuda ]';
+    if (session.players.length >= 1) {
+        comandos += '  *[ !iniciar ]*';
+    }
+
+    let lobbyMessage = `*Mesa de UNO Criada!* 🃏\n\n*Jogadores:*\n${playersList}\n---\n${comandos}`;
+
+    if (session.players.length === 1) {
+        lobbyMessage += `\n\n*Aviso:* Se iniciar agora, você jogará contra o *${unoBot.BOT_NAME}*! 🤖`;
+    }
+
+    return lobbyMessage;
+}
+
+// =================================================================
 // AJUDA
 // =================================================================
 
@@ -504,7 +560,13 @@ async function enviarAjudaLobby(session, message) {
                    `- !entrar <seu_nome> - Entra na partida (limite de 2 jogadores)\n` +
                    `- !iniciar - Começa o jogo com 2 jogadores\n` +
                    `- !sair - Fecha o lobby`;
-    }
+    } else if (session.game === 'uno') {
+        ajudaMsg = `📖 *Comandos do Lobby de UNO:*\n` +
+                   `- !entrar <seu_nome> - Entra na partida (até 8 jogadores)\n` +
+                   `- !iniciar - Começa o jogo com os jogadores atuais\n` +
+                   `- !sair - Fecha o lobby ou sai dele\n\n` +
+                   `Se apenas 1 jogador iniciar, um bot entrará na partida.`;
+    }
     await message.reply(ajudaMsg);
 }
 

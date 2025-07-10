@@ -1,0 +1,3473 @@
+// C:\Users\Guilherme\bot-whatsapp\controllers\commandHandler.js
+
+const logger = require('../utils/logger');
+const config = require('../config.json');
+const sessionManager = require('../sessions/sessionManager');
+const lobby = require('../games/lobby');
+const pokerActions = require('../games/Poker/playerActions');
+const trucoActions = require('../games/Truco/playerActions');
+const forcaActions = require('../games/Forca/playerActions');
+const velhaActions = require('../games/Velha/playerActions');
+const handleMusica = require('./musicaHandler');
+const JOGOS_VALIDOS = ['poker', 'truco', 'forca', 'velha'];
+
+async function handleCommand(message, client) {
+    try {
+        const { from, body } = message;
+        logger.log(message, `Comando recebido: ${body}`);
+        console.log(`[ID Hunter] Mensagem recebida do ID: ${from}`);
+        const isGroup = from.endsWith('@g.us');
+
+        // --- NOVO BLOCO DE FILTRAGEM DE GRUPO ---
+        if (config.enableGroupFilter && isGroup && !config.allowedGroupIds.includes(from)) {
+            // O logger vai buscar o nome do contato e do chat automaticamente!
+            logger.log(message, 'Comando ignorado: grupo não está na whitelist.');
+            return;
+        }
+
+        // --- BLOCO DE DEBUG PARA O JOGO DA FORCA NO PV ---
+        
+
+        const commandArgs = body.split(' ');
+        const command = commandArgs[0].toLowerCase();
+
+        // COMANDOS GLOBAIS
+        if (command === '!botzap') {
+            const botZapMessage = 
+                                  `*Como começar um jogo?*\n` +
+                                  `Digite \`!jogo <nome do jogo>\`\n\n` +
+                                  `*Jogos Disponíveis:*\n` +
+                                  `• Poker\n` +
+                                  `• Truco\n` +
+                                  `• Forca\n` +
+                                  `• Velha\n\n` +
+                                  `---\n\n` +
+                                  `*Outros comandos:*\n` +
+                                  `• \`!figurinha\` - Responda a uma imagem para criar um sticker.\n` +
+                                  `• \`!musica <nome>\` - Envia o link de uma música do YouTube.\n` +
+                                  `• \`!sair\` - Encerra um jogo ou lobby em andamento.\n\n` +
+                                  `Vamos começar? 🎉`;
+            await message.reply(botZapMessage);
+            return;
+        }
+
+        if (command === '!id') {
+            await message.reply(`O ID deste chat é:\n\`${from}\``);
+            return;
+        }
+
+        if (command === '!debug') {
+            console.log('===== OBJETO MESSAGE COMPLETO =====');
+            console.log(message);
+            console.log('=================================');
+            await message.reply('O objeto da mensagem foi impresso no console do bot. 😉');
+            return;
+        }
+
+        if (command === '!figurinha' || command === '!sticker') {
+            if (message.hasQuotedMsg) {
+                const quotedMsg = await message.getQuotedMessage();
+                if (quotedMsg.hasMedia) {
+                    await message.reply("Criando sua figurinha, um momento... 🎨");
+                    try {
+                        const media = await quotedMsg.downloadMedia();
+                        await client.sendMessage(from, media, { sendMediaAsSticker: true, stickerAuthor: "BotZap 🤖", stickerName: "Criado pelo Bot" });
+                    } catch (error) {
+                        await message.reply("❌ Ih, deu erro! Tente com outra imagem ou vídeo curto.");
+                    }
+                } else {
+                    await message.reply("Você precisa responder a uma imagem ou vídeo para eu transformar em figurinha!");
+                }
+            } else {
+                await message.reply("Para criar uma figurinha, responda a uma imagem com o comando `!figurinha`.");
+            }
+            return;
+        }
+
+        if (command === '!musica') {
+            const query = commandArgs.slice(1).join(' '); 
+            return await handleMusica(message, client, query);
+        }
+        
+        // =======================================================
+        // LÓGICA DE SESSÃO DE JOGO
+        // =======================================================
+
+        let session = isGroup ? sessionManager.getSession(from) : sessionManager.getSession(sessionManager.getGroupFromPlayer(from));
+        
+        if (command === '!jogo') {
+            if (session) {
+            return message.reply(`❌ Um jogo de *${session.game}* já está em andamento. Para encerrar, use \`!sair\`.`);
+            }
+
+            const gameName = commandArgs[1]?.toLowerCase();
+            if (!gameName) {
+                return message.reply(`🤔 Qual jogo você quer iniciar? Use: \`!jogo <nome do jogo>\`\n\n*Jogos disponíveis:*\n${JOGOS_VALIDOS.join(', ')}`);
+            }
+
+            if (!JOGOS_VALIDOS.includes(gameName)) {
+                return message.reply(`❌ Jogo inválido! Os jogos disponíveis são: *${JOGOS_VALIDOS.join(', ')}*.`);
+            }
+
+            const groupId = message.from;
+            const creatorId = message.author || message.from;
+            const novaSessao = sessionManager.createSession(groupId, gameName, creatorId);
+
+            if (novaSessao) {
+                await lobby.criarLobby(novaSessao, client);
+            } else {
+                await message.reply('❌ Ocorreu um erro ao criar a sessão do jogo.');
+            }
+            return;
+        }
+        
+        if (!session) {
+            if (command.startsWith('!')) {
+                 await message.reply('Nenhum jogo em andamento. Para começar, digite:\n`!jogo <nome do jogo>\n Para mais informações digite:`!botzap` `');
+            }
+            return;
+        }
+
+        if (session.status === 'lobby') {
+            await lobby.handleLobbyCommand(message, session, client);
+            return;
+        }
+
+        if (session.status === 'em_jogo') {
+            switch (session.game) {
+                case 'poker':
+                    await pokerActions.handleGameCommand(message, session, client);
+                    break;
+                case 'truco':
+                    await trucoActions.handleGameCommand(message, session, client);
+                    break;
+                case 'forca':
+                    await forcaActions.handleGameCommand(message, session, client);
+                    break;
+                case 'velha':
+                    await velhaActions.handleGameCommand(message, session, client);
+                    break;
+            }
+            return;
+        }
+
+    } catch (error) {
+        console.error('ERRO FATAL AO PROCESSAR COMANDO:', error);
+        await message.reply('❌ Ocorreu um erro inesperado ao processar seu comando.');
+    }
+}
+
+module.exports = handleCommand;// controllers/musicaHandler.js
+
+const playdl = require('play-dl');
+
+async function handleMusica(message, client, query) {
+    if (!query) {
+        return await message.reply('❌ Para buscar uma música, use: `!musica <nome da música>`');
+    }
+
+    await message.reply(`🎵 Procurando o link para: *${query}*...`);
+
+    try {
+        const videos = await playdl.search(query, { limit: 1, source: { youtube: "video" } });
+        if (!videos || videos.length === 0) {
+            return await message.reply('❌ Nenhum resultado encontrado no YouTube.');
+        }
+
+        const video = videos[0];
+
+        if (!video || !video.id) {
+            return await message.reply('❌ Ocorreu um erro ao obter os detalhes do vídeo.');
+        }
+
+        // --- CORREÇÃO FINAL AQUI ---
+        // Adicionado o '$' para a interpolação da string funcionar
+        const videoUrl = `https://www.youtube.com/watch?v=$${video.id}`;
+        
+        const replyMessage = `✅ Aqui está seu link:\n\n*${video.title}*\n${videoUrl}`;
+        
+        await message.reply(replyMessage);
+
+    } catch (err) {
+        console.error('Erro ao buscar link da música:', err);
+        await message.reply('❌ Desculpe, ocorreu um erro inesperado ao tentar buscar o link.');
+    }
+}
+
+module.exports = handleMusica;// games/Forca/botPlayer.js
+
+const BOT_ID = 'bot_forca@cpu.bot';
+const BOT_NAME = 'BOT Palpiteiro';
+
+/**
+ * Cria um objeto de jogador para o bot.
+ */
+function createBotPlayer() {
+    console.log(`[ForcaBot] Criando jogador bot: ${BOT_NAME}`);
+    return { id: BOT_ID, name: BOT_NAME };
+}
+
+/**
+ * O bot decide sua próxima ação: chutar uma letra aleatória que ainda não foi tentada.
+ * @param {object} gameState - O estado atual do jogo.
+ * @returns {string|null} O comando da jogada (ex: "!letra A") ou null se não houver mais letras.
+ */
+function decideAction(gameState) {
+    const alfabeto = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
+    const letrasTentadas = gameState.letrasTentadas || [];
+
+    // Filtra o alfabeto para obter apenas as letras que ainda não foram usadas
+    const letrasDisponiveis = alfabeto.filter(letra => !letrasTentadas.includes(letra));
+
+    if (letrasDisponiveis.length === 0) {
+        return null; // Não há mais letras para chutar
+    }
+
+    // Escolhe uma letra aleatória da lista de disponíveis
+    const letraAleatoria = letrasDisponiveis[Math.floor(Math.random() * letrasDisponiveis.length)];
+    
+    const command = `!letra ${letraAleatoria}`;
+    console.log(`[ForcaBot] Decisão do bot: ${command}`);
+    return command;
+}
+
+module.exports = { createBotPlayer, decideAction, BOT_ID };// C:\Users\Guilherme\bot-whatsapp\games\Forca\forca.js
+
+const { MessageMedia } = require('whatsapp-web.js');
+const path = require('path');
+const sessionManager = require('../../sessions/sessionManager');
+const getPalavraAleatoria = require('./palavras');
+const botPlayer = require('./botPlayer'); // Importa o nosso novo bot
+
+function montarDisplay(gameState) {
+    // Calcula o número de erros para saber qual imagem carregar (forca_0, forca_1, etc.)
+    const erros = 6 - gameState.vidas;
+    const imagePath = path.join(__dirname, 'assets', `forca_${erros}.png`);
+    const media = MessageMedia.fromFilePath(imagePath);
+
+    // Monta a legenda no formato que você pediu
+    const palavraDisplay = gameState.palavraOculta.join(' ');
+    let legenda = `Palavra: \`${palavraDisplay}\`\n\n`;
+
+    if (gameState.letrasTentadas.some(l => !gameState.palavra.includes(l))) {
+        const letrasErradas = gameState.letrasTentadas.filter(l => !gameState.palavra.includes(l));
+        legenda += `Letras erradas: ${letrasErradas.join(', ')}\n\n`;
+    }
+    
+    legenda += 'Para jogar, digite `!letra <letra>`';
+
+    return { media, legenda };
+}
+
+/** Prepara o estado inicial do jogo da Forca */
+function prepararJogo(session) {
+    console.log(`[Forca] Jogo preparado para ${session.groupId}`);
+    session.gameState = {
+        jogadores: session.players.map(p => ({ ...p })),
+        definidorDaPalavra: null,
+        definidorIndex: 0, // <<< ADICIONADO: Começa com o primeiro jogador (índice 0)
+        vezDoJogador: 0,
+        palavra: [],
+        palavraOculta: [],
+        letrasTentadas: [],
+        vidas: 6,
+        status: 'preparando'
+    };
+    session.status = 'em_jogo';
+}
+
+/** Inicia uma nova rodada (ou a primeira) */
+async function iniciarRodada(session, client) {
+    const { gameState } = session;
+    
+    // Reseta o estado da rodada
+    gameState.palavra = [];
+    gameState.palavraOculta = [];
+    gameState.letrasTentadas = [];
+    gameState.vidas = 6;
+    
+    if (gameState.modo === 'solo') {
+        // Lógica do modo solo permanece a mesma
+    } else { // Multiplayer
+        // Usa o índice para pegar o definidor da vez
+        const definidor = gameState.jogadores[gameState.definidorIndex]; 
+        gameState.definidorDaPalavra = definidor.id;
+        // A vez de jogar começa com o jogador seguinte ao definidor
+        gameState.vezDoJogador = (gameState.definidorIndex + 1) % gameState.jogadores.length; 
+        gameState.status = 'definindo_palavra';
+
+        await client.sendMessage(session.groupId, `Nova rodada! Agora é a vez de *${definidor.name}* escolher a palavra secreta. Estou aguardando no privado... 🤫`);
+        await client.sendMessage(definidor.id, `Sua vez de escolher a palavra para o jogo da forca!\nUse o comando \`!palavra <SUA_PALAVRA>\` aqui no nosso privado (sem acentos ou espaços).`);
+    }
+}
+
+/** Dispara a ação do bot de forma assíncrona */
+async function dispararAcaoBot(session, client) {
+    await new Promise(resolve => setTimeout(resolve, 1500)); // Pausa para o bot "pensar"
+
+    const comandoBot = botPlayer.decideAction(session.gameState);
+    if (comandoBot) {
+        const fakeMessage = { author: botPlayer.BOT_ID, body: comandoBot, reply: () => {} };
+        await processarLetra(fakeMessage, session, client);
+    }
+}
+
+/** Lida com a palavra secreta enviada no PV */
+async function definirPalavra(message, session, client) {
+    // ... (o início da função, com as validações, continua o mesmo)
+    const { from, body } = message;
+    const { gameState } = session;
+
+    if (from !== gameState.definidorDaPalavra) { return; }
+    if (gameState.status !== 'definindo_palavra') { return message.reply("❌ Você só pode definir a palavra no início da rodada."); }
+
+    const palavra = body.split(' ').slice(1).join(' ').trim().toUpperCase();
+    
+    if (!palavra || palavra.length < 3 || palavra.length > 15 || !/^[A-Z]+$/.test(palavra)) {
+        return client.sendMessage(from, '❌ Comando inválido ou palavra inválida! Use: `!palavra SUA_PALAVRA` (apenas letras, sem espaços, de 3 a 15 caracteres).');
+    }
+
+    gameState.palavra = palavra.split('');
+    gameState.palavraOculta = Array(palavra.length).fill('_');
+    gameState.status = 'aguardando_palpite';
+    
+    await client.sendMessage(from, `✅ Sua palavra foi definida, ela é: *${palavra}*`);
+
+    const proximoJogador = gameState.jogadores[gameState.vezDoJogador];
+    
+    // --- ALTERAÇÃO PARA USAR O DISPLAY COM IMAGEM ---
+    const { media, legenda } = montarDisplay(gameState);
+    const legendaComVez = `A palavra foi definida! *${proximoJogador.name}*, é sua vez de adivinhar.\n\n${legenda}`;
+    await client.sendMessage(session.groupId, media, { caption: legendaComVez });
+    // --- FIM DA ALTERAÇÃO ---
+
+    if (proximoJogador && proximoJogador.id === botPlayer.BOT_ID) {
+        await dispararAcaoBot(session, client);
+    }
+}
+
+/** Processa a tentativa de uma letra */
+async function processarLetra(message, session, client) {
+    // ... (o início da função, com as validações de vez, continua o mesmo)
+    const { gameState } = session;
+    const playerId = message.author || message.from;
+
+    if (gameState.status !== 'aguardando_palpite') { return; }
+    if (playerId === gameState.definidorDaPalavra) { return message.reply("Você não pode chutar letras, você que escolheu a palavra!"); }
+    if (playerId !== gameState.jogadores[gameState.vezDoJogador].id) { return message.reply("Opa, não é a sua vez de jogar!"); }
+    
+    const letra = message.body.split(' ')[1]?.toUpperCase();
+
+    if (!letra || letra.length !== 1 || !/^[A-Z]$/.test(letra)) { return; }
+    if (gameState.letrasTentadas.includes(letra)) {
+        if(playerId !== botPlayer.BOT_ID) message.reply(`A letra *${letra}* já foi tentada!`);
+        return;
+    }
+    gameState.letrasTentadas.push(letra);
+
+    // ... (a lógica de acerto, erro e verificação de vitória/derrota continua a mesma)
+    const acertou = gameState.palavra.includes(letra);
+    if (acertou) {
+        gameState.palavra.forEach((l, index) => { if (l === letra) gameState.palavraOculta[index] = letra; });
+    } else {
+        gameState.vidas--;
+    }
+
+    const vitoria = !gameState.palavraOculta.includes('_');
+    const derrota = gameState.vidas <= 0;
+
+    // --- LÓGICA DE MENSAGEM FINAL ATUALIZADA ---
+    if (vitoria || derrota) {
+        const autorDaJogada = gameState.jogadores.find(p => p.id === playerId)?.name || 'Alguém';
+        let mensagemRodada = vitoria
+            ? `🏆 Rodada vencida por *${autorDaJogada.toUpperCase()}*!`
+            : `💀 Fim da rodada! Vocês não adivinharam.`;
+        
+        await client.sendMessage(session.groupId, mensagemRodada);
+
+        const displayFinal = montarDisplay(gameState);
+        const legendaFinal = `A palavra era: *${gameState.palavra.join('')}*`;
+        await client.sendMessage(session.groupId, displayFinal.media, { caption: legendaFinal });
+        
+        // Incrementa o índice para a próxima rodada
+        gameState.definidorIndex++; 
+
+        // Verifica se todos já definiram uma palavra
+        if (gameState.definidorIndex >= gameState.jogadores.length) {
+            await client.sendMessage(session.groupId, '🏁 *FIM DE JOGO!* Todos os jogadores já definiram uma palavra. Obrigado por jogar!');
+            sessionManager.endSession(session.groupId);
+            return;
+        } else {
+            // Prepara para a próxima rodada
+            await client.sendMessage(session.groupId, 'Próxima rodada em 5 segundos...');
+            // Usamos um timeout para dar um respiro entre as rodadas
+            setTimeout(() => {
+                iniciarRodada(session, client);
+            }, 5000);
+            return;
+        }
+    }
+    // --- FIM DA ATUALIZAÇÃO ---
+    
+    // Avança para o próximo jogador
+    gameState.vezDoJogador = (gameState.vezDoJogador + 1) % gameState.jogadores.length;
+    if (gameState.jogadores[gameState.vezDoJogador].id === gameState.definidorDaPalavra) {
+        gameState.vezDoJogador = (gameState.vezDoJogador + 1) % gameState.jogadores.length;
+    }
+
+    // --- ALTERAÇÃO PARA ENVIAR O DISPLAY COM IMAGEM ---
+    const proximoJogador = gameState.jogadores[gameState.vezDoJogador];
+    const { media, legenda } = montarDisplay(gameState);
+    const legendaComVez = `${legenda}\n\nÉ a vez de *${proximoJogador.name}*.`;
+    await client.sendMessage(session.groupId, media, { caption: legendaComVez });
+    // --- FIM DA ALTERAÇÃO ---
+
+    if (proximoJogador.id === botPlayer.BOT_ID) {
+        await dispararAcaoBot(session, client);
+    }
+}
+
+// Exporta as funções
+module.exports = { prepararJogo, iniciarRodada, definirPalavra, processarLetra, montarDisplay };// C:\Users\Guilherme\bot-whatsapp\games\Forca\palavras.js
+
+const palavras = [
+    "BANANA", "COMPUTADOR", "WHATSAPP", "PROGRAMADOR",
+    "FIGURINHA", "TRUCO", "DESENVOLVEDOR", "INTELIGENCIA",
+    "ARTIFICIAL", "TECLADO", "AVENTURA", "BIBLIOTECA",
+    "CHOCOLATE", "ELEFANTE", "FANTASMA", "GIRAFA"
+];
+
+// Exporta uma função que retorna uma palavra aleatória da lista
+module.exports = function getPalavraAleatoria() {
+    const indice = Math.floor(Math.random() * palavras.length);
+    return palavras[indice];
+};// Substitua o conteúdo de games/Forca/playerActions.js
+
+const forca = require('./forca');
+const sessionManager = require('../../sessions/sessionManager');
+
+async function handleGameCommand(message, session, client) {
+    const command = message.body.split(' ')[0].toLowerCase();
+    const playerId = message.author || message.from; // ID de quem enviou o comando
+
+    switch (command) {
+        case '!palavra': // <<< ADICIONADO
+            await forca.definirPalavra(message, session, client);
+            break;
+
+        case '!letra':
+            await forca.processarLetra(message, session, client);
+            break;
+
+        // --- LÓGICA DE SAÍDA CORRIGIDA ---
+        case '!sair':
+            const playerIndex = session.gameState.jogadores.findIndex(p => p.id === playerId);
+            
+            // Se o jogador não está na partida, não faz nada
+            if (playerIndex === -1) return;
+
+            const playerSaindo = session.gameState.jogadores[playerIndex];
+            
+            // Remove o jogador da lista
+            session.gameState.jogadores.splice(playerIndex, 1);
+            
+            // Agora que a função está exportada, esta chamada funcionará
+            sessionManager.unmapPlayersInGroup([playerId]); 
+
+            await message.reply(`*${playerSaindo.name}* saiu do jogo da Forca.`);
+
+            // Se quem saiu era o definidor da palavra ATUAL, a rodada precisa recomeçar
+            const eraDefinidor = playerId === session.gameState.definidorDaPalavra;
+
+            // Se restarem menos de 2 jogadores, encerra o jogo
+            // (O bot também conta, então a lógica deve ser ajustada se o bot puder jogar sozinho)
+            if (session.gameState.jogadores.length < 2) {
+                await client.sendMessage(session.groupId, 'O jogo da Forca foi encerrado por falta de jogadores.');
+                sessionManager.endSession(session.groupId);
+                return;
+            }
+
+            // Se o jogador que saiu era o definidor, a rodada reinicia.
+            // O 'definidorIndex' não precisa ser alterado, pois o array foi modificado.
+            // A função iniciarRodada pegará o jogador que agora ocupa essa posição.
+            if (eraDefinidor) {
+                await client.sendMessage(session.groupId, `Como quem estava escolhendo a palavra saiu, vamos para a próxima rodada!`);
+                await forca.iniciarRodada(session, client);
+            }
+            break;
+            
+        default:
+            break;
+    }
+}
+
+module.exports = {
+    handleGameCommand
+};const evaluator = require('poker-evaluator');
+
+// Recebe um array com 2 cartas de cada jogador e as cartas da mesa
+function avaliarMaos(jogadores, maosPrivadas, cartasMesa) {
+  const resultados = [];
+
+  jogadores.forEach((jogador, idx) => {
+    const maoCompleta = [...maosPrivadas[idx], ...cartasMesa];
+    console.log(`👀 Verificando mão do ${jogador}:`, maoCompleta);
+
+    const resultado = evaluator.evalHand(maoCompleta);
+
+    resultados.push({
+      jogador,
+      descricao: resultado.handName,
+      pontuacao: resultado.value,
+      cartas: maoCompleta,
+    });
+  });
+
+  resultados.sort((a, b) => b.pontuacao - a.pontuacao);
+
+  const vencedor = resultados[0];
+
+  return {
+    vencedor,
+    ranking: resultados
+  };
+}
+
+module.exports = { avaliarMaos };// C:\Users\Guilherme\bot-whatsapp\games\Poker\pokerAI.js (VERSÃO FINAL)
+
+const chipManager = require('../../economy/chipManager');
+const evaluator = require('poker-evaluator');
+
+const BOT_ID = 'bot@cpu.bot';
+const BOT_NAME = 'BOT Dealer';
+
+// Funções de análise (getPreFlopHandCategory, getPostFlopHandStrength, definirPerfilFinanceiro)
+// ... cole aqui as 3 funções de análise que já tínhamos e funcionavam ...
+// Vou colocar elas aqui novamente para garantir que tenhamos a versão completa.
+
+function getPreFlopHandCategory(hand) {
+    const ranks = '23456789TJQKA', r1 = hand[0][0], r2 = hand[1][0];
+    const isSuited = hand[0][1] === hand[1][1], isPair = r1 === r2;
+    const highCard = ranks.indexOf(r1) > ranks.indexOf(r2) ? r1 : r2;
+    const lowCard = ranks.indexOf(r1) > ranks.indexOf(r2) ? r2 : r1;
+    let handKey = highCard + lowCard;
+    if (!isPair) handKey += isSuited ? 's' : 'o';
+    const PREMIUM_HANDS = ['AA', 'KK', 'QQ', 'JJ', 'AKs'];
+    const STRONG_HANDS = ['TT', 'AQs', 'AJs', 'KQs', 'AKo'];
+    const SPECULATIVE_HANDS = ['99', '88', '77', 'A9s', 'A8s', 'A7s', 'A6s', 'A5s', 'A4s', 'A3s', 'A2s', 'KJs', 'KTs', 'QJs', 'QTs', 'JTs', 'T9s', '98s', '87s', '76s'];
+    const MARGINAL_HANDS = ['66', '55', '44', '33', '22', 'A9o', 'KJo', 'QJo'];
+    if (PREMIUM_HANDS.includes(handKey)) return 'MUITO_FORTE';
+    if (STRONG_HANDS.includes(handKey)) return 'FORTE';
+    if (SPECULATIVE_HANDS.includes(handKey)) return 'MEDIA';
+    if (MARGINAL_HANDS.includes(handKey)) return 'FRACA';
+    return 'MUITO_FRACA';
+}
+
+function getPostFlopHandStrength(botHand, board) {
+    const result = evaluator.evalHand([...botHand, ...board]);
+    // Sequência de poker: Royal Flush > Straight Flush > 4 of a Kind > Full House > Flush > Straight
+    if (result.value > 6604) return { name: result.handName, strength: 'MUITO_FORTE' }; // Flush ou melhor
+    if (result.value > 3218) return { name: result.handName, strength: 'FORTE' };     // Two Pair, 3 of a Kind, Straight
+    if (result.value > 1609) return { name: result.handName, strength: 'MEDIA' };     // One Pair
+    return { name: result.handName, strength: 'FRACA' };                              // High Card
+}
+
+function definirPerfilFinanceiro(session) {
+    const botStack = chipManager.getPlayerChips(BOT_ID);
+    const bigBlind = session.gameState.bigBlindValue;
+    if (!bigBlind || bigBlind === 0) return 'DEFAULT';
+    const stackInBBs = botStack / bigBlind;
+    if (stackInBBs < 30) return 'CONSERVADOR';
+    if (stackInBBs > 120) return 'AGRESSIVO';
+    return 'DEFAULT';
+}
+
+function calculateBetSize(session, profile, handStrength, isRaise = false) {
+    const { pote, apostaAtual, bigBlindValue } = session.gameState;
+    const botStack = chipManager.getPlayerChips(BOT_ID);
+    let betAmount;
+
+    if (isRaise) {
+        const raiseMultiplier = profile === 'AGRESSIVO' ? 3 : 2.5;
+        betAmount = apostaAtual * raiseMultiplier;
+    } else {
+        let potPercentage = profile === 'AGRESSIVO' ? 0.75 : (profile === 'CONSERVADOR' ? 0.5 : 0.65);
+        if (handStrength === 'MEDIA') potPercentage = 0.4; // Blefes são menores
+        betAmount = pote * potPercentage;
+    }
+    const finalBet = Math.max(bigBlindValue, Math.round(betAmount / 10) * 10);
+    return Math.min(botStack, finalBet);
+}
+
+// A nova decideAction que retorna um COMANDO DE TEXTO
+// C:\Users\Guilherme\bot-whatsapp\games\Poker\botPlayer.js
+
+// ... (todo o código anterior como getPreFlopHandCategory, etc. permanece o mesmo)
+
+// A nova decideAction que retorna um COMANDO DE TEXTO
+function decideAction(session) {
+    const gameState = session.gameState;
+    const botStack = chipManager.getPlayerChips(BOT_ID);
+    const perfil = definirPerfilFinanceiro(session);
+    const handInfo = (gameState.etapa === 'pre-flop') 
+        ? { strength: getPreFlopHandCategory(gameState.maosPrivadas[BOT_ID]) }
+        : getPostFlopHandStrength(gameState.maosPrivadas[BOT_ID], gameState.mesa);
+
+    const apostaRodadaBot = gameState.apostasRodada[BOT_ID] || 0;
+    const isFacingBet = gameState.apostaAtual > apostaRodadaBot;
+    const amountToCall = gameState.apostaAtual - apostaRodadaBot;
+
+    let command = '!desistir';
+    let amount = 0;
+
+    // --- NOVA LÓGICA DE DECISÃO ---
+
+    // 1. O bot pode cobrir a aposta?
+    if (isFacingBet && botStack <= amountToCall) {
+        // Se não pode cobrir, as únicas opções são all-in (pagando o que resta) ou desistir.
+        const odds = 0.2; // Chance de 20% de pagar com mão FORTE (não MUITO_FORTE)
+        if (handInfo.strength === 'MUITO_FORTE' || (handInfo.strength === 'FORTE' && Math.random() < odds)) {
+            command = '!allin'; // O handler de allin cuidará do resto.
+        } else {
+            command = '!desistir';
+        }
+    } else {
+        // Se PODE cobrir a aposta, usa a lógica antiga.
+        if (handInfo.strength === 'MUITO_FORTE') {
+            command = isFacingBet ? '!aumentar' : '!apostar';
+        } else if (handInfo.strength === 'FORTE') {
+            command = isFacingBet ? '!pagar' : '!apostar';
+        } else if (handInfo.strength === 'MEDIA') {
+            command = isFacingBet ? '!desistir' : '!mesa';
+            // Lógica de blefe simples
+            if (!isFacingBet && perfil !== 'CONSERVADOR' && Math.random() < 0.15) {
+                command = '!apostar';
+            }
+        } else { // FRACA ou MUITO_FRACA
+            command = isFacingBet ? '!desistir' : '!mesa';
+        }
+    }
+
+    // 2. Se a decisão for apostar ou aumentar, calcula o valor.
+    if (command === '!apostar' || command === '!aumentar') {
+        const isRaise = command === '!aumentar';
+        amount = calculateBetSize(session, perfil, handInfo.strength, isRaise);
+
+        // Se o valor calculado for todo o stack do bot, a ação correta é !allin
+        if (amount >= botStack) {
+            command = '!allin';
+            amount = 0; // O comando !allin não precisa de valor.
+        }
+    }
+    
+    // 3. Validação final para não dar !mesa enfrentando aposta
+    if (command === '!mesa' && isFacingBet) {
+        command = '!desistir';
+    }
+
+    const finalCommand = amount > 0 ? `${command} ${amount}` : command;
+    console.log(`[pokerAI] Perfil: ${perfil} | Força: ${handInfo.strength} | Stack: ${botStack} -> Decisão: ${finalCommand}`);
+    return finalCommand;
+}
+
+
+module.exports = {
+    createBotPlayer: () => ({ id: BOT_ID, name: BOT_NAME }),
+    decideAction,
+    BOT_ID
+};// C:\Users\Guilherme\bot-whatsapp\games\Poker\playerActions.js
+
+const poker = require('./poker');
+const sessionManager = require('../../sessions/sessionManager');
+const pokerValidators = require('./pokerValidators');
+const chipManager = require('../../economy/chipManager');
+
+
+// Nova função "mãe" para lidar com TODOS os comandos durante o jogo
+async function handleGameCommand(message, session, client) {
+    const { from, body } = message;
+    const commandArgs = body.split(' ');
+    const command = commandArgs[0].toLowerCase();
+    
+    console.log(`[Truco Actions] Comando '${command}' recebido de ${from} na sessão ${session.groupId}`);
+
+    // Nova lógica para identificar comandos numéricos
+    const isNumberCommand = command.startsWith('!') && command.length > 1 && !isNaN(parseInt(command.substring(1)));
+
+    if (isNumberCommand) {
+        // Para manter a compatibilidade com a função `jogarCarta` que já temos,
+        // nós "traduzimos" o comando !1 para !carta 1 internamente.
+        const number = command.substring(1);
+        const hideOrNot = commandArgs.slice(1).join(' '); // Pega o resto, como "hide"
+        message.body = `!carta ${number} ${hideOrNot}`;
+        await truco.jogarCarta(message, session, client);
+    } else if (command === '!truco') {
+        await truco.pedirTruco(message, session, client);
+    } else if (command === '!aceitar') {
+        await truco.aceitarTruco(message, session, client);
+    } else if (command === '!correr') {
+        await truco.correrDoTruco(message, session, client);
+    } else if (['!pede6', '!pede9', '!pede12'].includes(command)) {
+        await truco.aumentarAposta(message, session, client);
+    } else if (command === '!sair') {
+        if (sessionManager.endSession(session.groupId)) {
+            await message.reply('O jogo foi encerrado.');
+        }
+    } else {
+        if (command.startsWith('!')) {
+             await message.reply("Comando de Truco não reconhecido.");
+        }
+    }
+}
+
+async function handleLeaveCommand(message, session, client) {
+    const playerId = message.author || message.from;
+
+    if (!pokerValidators.isPlayerInGame(session, playerId)) {
+        await message.reply('Você não está mais na mesa.');
+        return;
+    }
+
+    const playerName = pokerValidators.getFormattedId(playerId, session);
+    const wasHisTurn = pokerValidators.isPlayersTurn(session, playerId);
+
+    session.players = session.players.filter(p => p.id !== playerId);
+    session.gameState.ativos = session.gameState.ativos.filter(id => id !== playerId);
+    chipManager.removePlayer(playerId);
+    
+    await client.sendMessage(session.groupId, `👋 ${playerName} saiu do jogo.`);
+
+    if (session.gameState.ativos.length < 2 && session.players.length < 2) {
+        await client.sendMessage(session.groupId, 'Jogadores insuficientes para continuar. Encerrando o jogo.');
+        sessionManager.endSession(session.groupId);
+        return;
+    }
+    
+    if (wasHisTurn) {
+        // Passa o ID do jogador que saiu para que o avanço de turno seja calculado corretamente
+        await poker.avancarTurnoApostas(session, client, playerId); // <-- MUDANÇA AQUI
+    }
+}
+
+// Funções de ação individuais (agora são chamadas internamente por handleGameCommand)
+async function handleCheckCommand(message, session, client) {
+    await poker.handleCheck(session, message.author || message.from, client);
+}
+async function handleCallCommand(message, session, client) {
+    await poker.handleCall(session, message.author || message.from, client);
+}
+async function handleBetCommand(message, session, client) {
+    const amount = parseInt(message.body.split(' ')[1]);
+    if (isNaN(amount) || amount <= 0) {
+        await message.reply('Valor de aposta inválido. Use: !apostar <valor>');
+        return;
+    }
+    await poker.handleBet(session, message.author || message.from, amount, client);
+}
+async function handleRaiseCommand(message, session, client) {
+    const amount = parseInt(message.body.split(' ')[1]);
+    if (isNaN(amount) || amount <= 0) {
+        await message.reply('Valor de aumento inválido. Use: !aumentar <valor>');
+        return;
+    }
+    await poker.handleRaise(session, message.author || message.from, amount, client);
+}
+async function handleAllInCommand(message, session, client) {
+    await poker.handleAllIn(session, message.author || message.from, client);
+}
+async function handleFold(message, session, client) {
+    const playerId = message.author || message.from;
+    
+    await client.sendMessage(session.groupId, `🚪 ${pokerValidators.getFormattedId(playerId, session)} desistiu da rodada.`);
+
+    session.gameState.ativos = session.gameState.ativos.filter(id => id !== playerId);
+    session.gameState.playersWhoActed.delete(playerId);
+
+    if (session.gameState.ativos.length === 1) {
+        const winnerId = session.gameState.ativos[0];
+        const pot = session.gameState.pote;
+        
+        chipManager.addChips(winnerId, pot);
+        
+        await client.sendMessage(session.groupId, `🎉 ${pokerValidators.getFormattedId(winnerId, session)} venceu a rodada! Ganhou ${pot} fichas.`);
+        
+        await poker.iniciarRodada(session, client);
+    } else {
+        // Passa o ID do jogador que desistiu para que o avanço de turno seja calculado corretamente
+        await poker.avancarTurnoApostas(session, client, playerId); // <-- MUDANÇA AQUI
+    }
+}
+function getPokerHelpMessage(session) {
+    // ... (código da função de ajuda permanece o mesmo)
+    let helpMessage = `📖 *Comandos de Poker:*\n`;
+    if (session.status === 'em_jogo') {
+        helpMessage += `- !status - Mostra o status atual da rodada\n`;
+        helpMessage += `- !mesa (ou !check) - Passa a vez sem apostar\n`; 
+        helpMessage += `- !pagar (ou !call) - Iguala a aposta atual\n`; 
+        helpMessage += `- !apostar <valor> - Faz uma aposta inicial\n`; 
+        helpMessage += `- !aumentar <valor> - Aumenta a aposta atual\n`; 
+        helpMessage += `- !allin - Aposta todas as suas fichas\n`; 
+        helpMessage += `- !desistir (ou !fold) - Sai da rodada atual\n`;
+    }
+    helpMessage += `\n*Comandos Gerais:*\n - !fimjogo - Encerra o jogo atual\n`; 
+    return helpMessage;
+}
+
+module.exports = {
+    handleGameCommand // Exportamos apenas a função "mãe"
+};// C:\Users\Guilherme\bot-whatsapp\games\Poker\poker.js
+
+const { MessageMedia } = require('whatsapp-web.js'); 
+const { gerarBaralho, gerarImagemCartas } = require('../baralhoUtils');
+const { avaliarMaos } = require('./avaliadorPoker');
+const chipManager = require('../../economy/chipManager');
+const sessionManager = require('../../sessions/sessionManager');
+const { getFormattedId } = require('./pokerValidators');
+const botPlayer = require('./botPlayer');
+
+// --- CONSTANTES ---
+const INITIAL_SMALL_BLIND = 50;
+const INITIAL_BIG_BLIND = 100;
+const BLIND_INCREASE_ROUNDS = 3;
+
+// --- FUNÇÕES DE LÓGICA PRINCIPAL ---
+
+function formatarCartasArray(cartas) {
+    const valorMap = { 'T': '10', 'J': 'J', 'Q': 'Q', 'K': 'K', 'A': 'A' };
+    const naipeMap = { 's': '♠️', 'h': '♥️', 'd': '♦️', 'c': '♣️' };
+    if (!Array.isArray(cartas) || cartas.length === 0) return [];
+    return cartas.map(carta => {
+        if (!carta || carta.length !== 2) return '??';
+        const valor = valorMap[carta[0]] || carta[0];
+        const naipe = naipeMap[carta[1]] || '?';
+        return `${valor}${naipe}`;
+    });
+}
+
+
+function initializeGameState(session) {
+    session.gameState = {
+        deck: [],
+        mesa: [],
+        etapa: 'inicio',
+        ativos: [],
+        maosPrivadas: {},
+        iniciou: false,
+        dealer: null,
+        sb: null,
+        bb: null,
+        currentPlayerIndex: 0,
+        apostaAtual: 0,
+        pote: 0,
+        smallBlindValue: INITIAL_SMALL_BLIND,
+        bigBlindValue: INITIAL_BIG_BLIND,
+        roundCounter: 0,
+        apostasRodada: {},
+        ultimoApostador: null,
+        numRaises: 0,
+        playersWhoActed: new Set(),
+        minRaiseAmount: 0,
+        playersAllIn: new Set(),
+    };
+}
+
+async function iniciarRodada(session, client) {
+    if (!session.gameState) {
+        initializeGameState(session);
+    }
+    if (session.players.length < 2) {
+        session.gameState.iniciou = false;
+        return;
+    }
+
+    session.gameState.roundCounter++;
+    await enviarMensagemPreRodada(session, client);
+    await new Promise(resolve => setTimeout(resolve, 1500));
+    if (session.gameState.roundCounter > 1 && session.gameState.roundCounter % BLIND_INCREASE_ROUNDS === 0) {
+        session.gameState.smallBlindValue *= 2;
+        session.gameState.bigBlindValue *= 2;
+        await client.sendMessage(session.groupId, `🚨 Atenção! Os blinds aumentaram para SB: ${session.gameState.smallBlindValue}, BB: ${session.gameState.bigBlindValue}!`);
+    }
+
+    session.gameState.deck = gerarBaralho();
+    session.gameState.mesa = [];
+    session.gameState.etapa = 'pre-flop';
+    session.gameState.ativos = session.players.filter(p => chipManager.getPlayerChips(p.id) > 0).map(p => p.id);
+
+    if (session.gameState.ativos.length < 2) {
+        await client.sendMessage(session.groupId, 'Não há jogadores suficientes com fichas para iniciar uma nova rodada. Jogo encerrado!');
+        sessionManager.endSession(session.groupId);
+        return;
+    }
+
+    session.gameState.maosPrivadas = {};
+    session.gameState.apostaAtual = 0;
+    session.gameState.pote = 0;
+    session.gameState.apostasRodada = {};
+    session.gameState.ultimoApostador = null;
+    session.gameState.numRaises = 0;
+    session.gameState.playersWhoActed = new Set();
+    session.gameState.minRaiseAmount = session.gameState.bigBlindValue;
+    session.gameState.playersAllIn = new Set();
+
+    const currentActivePlayerIds = session.gameState.ativos;
+    if (!session.gameState.dealer || !currentActivePlayerIds.includes(session.gameState.dealer)) {
+        session.gameState.dealer = currentActivePlayerIds[0];
+    } else {
+        const currentIdx = currentActivePlayerIds.indexOf(session.gameState.dealer);
+        session.gameState.dealer = currentActivePlayerIds[(currentIdx + 1) % currentActivePlayerIds.length];
+    }
+    const dealerIdx = currentActivePlayerIds.indexOf(session.gameState.dealer);
+    
+    // Lógica de Posição Corrigida
+    if (currentActivePlayerIds.length === 2) {
+        session.gameState.sb = currentActivePlayerIds[dealerIdx];
+        session.gameState.bb = currentActivePlayerIds[(dealerIdx + 1) % currentActivePlayerIds.length];
+        session.gameState.currentPlayerIndex = dealerIdx;
+    } else {
+        session.gameState.sb = currentActivePlayerIds[(dealerIdx + 1) % currentActivePlayerIds.length];
+        session.gameState.bb = currentActivePlayerIds[(dealerIdx + 2) % currentActivePlayerIds.length];
+        const bbIndex = currentActivePlayerIds.indexOf(session.gameState.bb);
+        session.gameState.currentPlayerIndex = (bbIndex + 1) % currentActivePlayerIds.length;
+    }
+    
+    // Pagamento dos blinds... (continua igual)
+    const sbPlayerId = session.gameState.sb;
+    const bbPlayerId = session.gameState.bb;
+    const sbChips = chipManager.getPlayerChips(sbPlayerId);
+    const bbChips = chipManager.getPlayerChips(bbPlayerId);
+    const actualSBbet = Math.min(sbChips, session.gameState.smallBlindValue);
+    const actualBBbet = Math.min(bbChips, session.gameState.bigBlindValue);
+
+    if (actualSBbet > 0) {
+        chipManager.deductChips(sbPlayerId, actualSBbet);
+        session.gameState.pote += actualSBbet;
+        session.gameState.apostasRodada[sbPlayerId] = actualSBbet;
+        // session.gameState.playersWhoActed.add(sbPlayerId); // <--- REMOVA ESTA LINHA
+        if (sbChips <= session.gameState.smallBlindValue) session.gameState.playersAllIn.add(sbPlayerId);
+    }
+    if (actualBBbet > 0) {
+        chipManager.deductChips(bbPlayerId, actualBBbet);
+        session.gameState.pote += actualBBbet;
+        session.gameState.apostasRodada[bbPlayerId] = actualBBbet;
+        // A aposta atual é definida, mas o BB ainda não "agiu" voluntariamente
+        session.gameState.apostaAtual = actualBBbet;
+        // session.gameState.playersWhoActed.add(bbPlayerId); // <--- ESSA LÓGICA NÃO EXISTIA AQUI, MAS GARANTA QUE NÃO ESTEJA
+        if (bbChips <= session.gameState.bigBlindValue) session.gameState.playersAllIn.add(bbPlayerId);
+    }
+
+    await enviarMensagemDeEtapa(session, client);
+    await new Promise(resolve => setTimeout(resolve, 1500));
+    
+    for (const jogadorId of session.gameState.ativos) {
+        const cartas = [session.gameState.deck.pop(), session.gameState.deck.pop()];
+        session.gameState.maosPrivadas[jogadorId] = cartas;
+
+        if (jogadorId !== botPlayer.BOT_ID) {
+            const imagePath = await gerarImagemCartas(cartas);
+            if (imagePath) {
+                const media = MessageMedia.fromFilePath(imagePath); // <--- CORRIGIDO
+                const comandos = getComandosDisponiveis(session);
+                const caption = `*Sua mão na rodada #${session.gameState.roundCounter}*`;
+                await client.sendMessage(jogadorId, media, { caption: caption });
+            } else {
+                await client.sendMessage(jogadorId, '⚠️ Houve um erro ao gerar a imagem das suas cartas.');
+            }
+        } else {
+            // Para o log do bot, podemos manter o texto simples
+            const valorMap = {'T':'10','J':'J','Q':'Q','K':'K','A':'A'};
+            const naipeMap = {'s':'♠️','h':'♥️','d':'♦️','c':'♣️'};
+            const cartasFormatadas = cartas.map(c => (valorMap[c[0]]||c[0]) + (naipeMap[c[1]]||c[1]));
+            console.log(`[Game] Cartas do BOT: ${cartasFormatadas.join(', ')}`);
+        }
+    }
+
+    // ==================================================================
+    // ================= INÍCIO DA SEÇÃO CORRIGIDA ======================
+    // ==================================================================
+    // NÃO chamamos mais avancarTurnoApostas aqui. Em vez disso, anunciamos
+    // o primeiro jogador a agir ou iniciamos a ação do bot.
+    const firstPlayerId = session.gameState.ativos[session.gameState.currentPlayerIndex];
+    if (firstPlayerId === botPlayer.BOT_ID) {
+        // Se o primeiro a agir for o bot, chama a ação dele diretamente.
+        await avancarTurnoApostas(session, client);
+    } else {
+        // Se for um humano, apenas anuncia a vez dele.
+        await enviarMensagemDeTurno(session, client);
+    }
+    // ==================================================================
+    // =================== FIM DA SEÇÃO CORRIGIDA =======================
+    // ==================================================================
+}
+
+async function avancarEtapa(session, client) {
+    const gameState = session.gameState;
+    const etapas = ['pre-flop', 'flop', 'turn', 'river', 'fim'];
+    const etapaAtualIdx = etapas.indexOf(gameState.etapa);
+    
+    const proximaEtapa = (etapaAtualIdx >= etapas.length - 2) ? 'fim' : etapas[etapaAtualIdx + 1];
+    gameState.etapa = proximaEtapa;
+
+    // Apenas avança para o showdown ou para a próxima rodada de apostas.
+    // A lógica de iniciar uma nova rodada só acontecerá DEPOIS do showdown.
+    if (gameState.etapa === 'fim') {
+        // --- LÓGICA DE SHOWDOWN ---
+        const jogadoresAtivos = gameState.ativos.filter(pId => gameState.maosPrivadas[pId]);
+        
+        if (jogadoresAtivos.length <= 1) {
+            const winnerId = jogadoresAtivos[0];
+            if (winnerId) {
+                chipManager.addChips(winnerId, gameState.pote);
+                await client.sendMessage(session.groupId, `🎉 ${getPlayerNameById(winnerId, session.players)} venceu e ganhou ${gameState.pote} fichas!`);
+            }
+        } else {
+            const maosPrivadasParaAvaliar = jogadoresAtivos.map(j => gameState.maosPrivadas[j]);
+            const resultado = avaliarMaos(jogadoresAtivos, maosPrivadasParaAvaliar, gameState.mesa);
+            let showdownMessage = "*Showdown! Revelando as cartas:*\n";
+            resultado.ranking.forEach(playerResult => {
+            const playerName = getFormattedId(playerResult.jogador, session);
+            // Esta linha agora funcionará por causa da função que adicionamos
+            const playerHand = formatarCartasArray(gameState.maosPrivadas[playerResult.jogador]); 
+            showdownMessage += `\n*${playerName}:* ${playerHand.join(' ')} -> *${playerResult.descricao}*`;
+            });
+            await client.sendMessage(session.groupId, showdownMessage);
+            await new Promise(resolve => setTimeout(resolve, 2500));
+            const winnerName = getFormattedId(resultado.vencedor.jogador, session);
+            chipManager.addChips(resultado.vencedor.jogador, gameState.pote);
+            await client.sendMessage(session.groupId, `🎉 *${winnerName}* venceu com *${resultado.vencedor.descricao}* e ganhou ${gameState.pote} fichas!`);
+        }
+        // Inicia a próxima rodada APÓS o showdown ter sido concluído.
+        await iniciarRodada(session, client);
+        return;
+
+    } else {
+        // --- LÓGICA PARA PRÓXIMA RODADA DE APOSTAS (FLOP, TURN, RIVER) ---
+        gameState.apostaAtual = 0;
+        gameState.apostasRodada = {};
+        gameState.ultimoApostador = null;
+        gameState.numRaises = 0;
+        gameState.playersWhoActed = new Set();
+        gameState.minRaiseAmount = gameState.bigBlindValue;
+
+        if (gameState.etapa === 'flop') {
+            gameState.mesa.push(...[gameState.deck.pop(), gameState.deck.pop(), gameState.deck.pop()]);
+        } else if (gameState.etapa === 'turn' || gameState.etapa === 'river') {
+            gameState.mesa.push(gameState.deck.pop());
+        }
+
+        await enviarMensagemDeEtapa(session, client);
+        await new Promise(resolve => setTimeout(resolve, 1500));
+
+            // Conta quantos jogadores ativos ainda podem fazer ações (não estão all-in)
+    const playersAbleToBet = gameState.ativos.filter(pId => !gameState.playersAllIn.has(pId));
+
+    if (playersAbleToBet.length < 2) {
+        console.log(`[Flow] Apenas ${playersAbleToBet.length} jogador(es) pode(m) apostar. Pulando para a próxima etapa automaticamente.`);
+        await client.sendMessage(session.groupId, 'Não há mais ações possíveis. Revelando as próximas cartas...');
+        await new Promise(resolve => setTimeout(resolve, 2000)); // Uma pausa para o fluxo ficar natural
+
+        // Chama a próxima etapa (ex: turn -> river -> fim) recursivamente até o showdown
+        await avancarEtapa(session, client);
+        return; // Impede que o resto da função (que procuraria o próximo jogador) seja executado
+    }
+        
+        const allPlayersInOrder = session.players.map(p => p.id);
+        const sortedActivePlayers = allPlayersInOrder.filter(pId => gameState.ativos.includes(pId));
+        const dealerIdx = sortedActivePlayers.indexOf(gameState.dealer);
+        let startIndex = -1;
+
+        for (let i = 1; i <= sortedActivePlayers.length; i++) {
+            const potentialPlayerId = sortedActivePlayers[(dealerIdx + i) % sortedActivePlayers.length];
+            if (!gameState.playersAllIn.has(potentialPlayerId)) {
+                startIndex = gameState.ativos.indexOf(potentialPlayerId);
+                break;
+            }
+        }
+
+        if (startIndex === -1) {
+            await avancarEtapa(session, client);
+            return;
+        }
+
+        gameState.currentPlayerIndex = startIndex;
+        const firstPlayerId = gameState.ativos[startIndex];
+
+        if (firstPlayerId === botPlayer.BOT_ID) {
+            await avancarTurnoApostas(session, client, null);
+        } else {
+            await enviarMensagemDeTurno(session, client);
+        }
+    }
+}
+
+
+async function avancarTurnoApostas(session, client, lastPlayerId) {
+    const gameState = session.gameState;
+    console.log(`\n[DEBUG] --- Iniciando avancarTurnoApostas (último a jogar: ${lastPlayerId || 'N/A'}) ---`);
+
+    // CORREÇÃO ALL-IN: Verifica se os jogadores que ainda podem agir já estão all-in.
+    const playersAbleToAct = gameState.ativos.filter(pId => !gameState.playersAllIn.has(pId));
+    if (playersAbleToAct.length < 2 && gameState.apostaAtual > 0) {
+        console.log('[DEBUG] Rodada de apostas terminada pois não há jogadores suficientes para continuar a ação.');
+        await client.sendMessage(session.groupId, 'Rodada de apostas encerrada! 💰');
+        await avancarEtapa(session, client);
+        return;
+    }
+
+    const playersToAct = gameState.ativos.filter(pId => !gameState.playersAllIn.has(pId));
+    
+    const roundIsOver = playersToAct.length > 0 && playersToAct.every(pId =>
+        gameState.playersWhoActed.has(pId) &&
+        (gameState.apostasRodada[pId] || 0) === gameState.apostaAtual
+    );
+    
+    console.log(`[DEBUG] Verificando se a rodada acabou: ${roundIsOver}`);
+    console.log(`[DEBUG] Jogadores que já agiram:`, Array.from(gameState.playersWhoActed));
+    console.log(`[DEBUG] Apostas na rodada:`, gameState.apostasRodada);
+    console.log(`[DEBUG] Aposta atual: ${gameState.apostaAtual}`);
+
+    if (gameState.ativos.length <= 1 || roundIsOver) {
+        if (roundIsOver) await client.sendMessage(session.groupId, 'Rodada de apostas encerrada! 💰');
+        console.log('[DEBUG] A rodada acabou. Avançando para a próxima etapa...');
+        await avancarEtapa(session, client);
+        return;
+    }
+    
+    console.log('[DEBUG] Rodada não acabou. Procurando próximo jogador...');
+    const playerOrder = session.players.map(p => p.id);
+    const lastPlayerIndex = playerOrder.indexOf(lastPlayerId || gameState.ativos[gameState.currentPlayerIndex]);
+
+    for (let i = 1; i <= playerOrder.length * 2; i++) {
+        const nextPlayerId = playerOrder[(lastPlayerIndex + i) % playerOrder.length];
+        console.log(`[DEBUG] Loop ${i}: Verificando ${nextPlayerId}...`);
+        
+        if (gameState.ativos.includes(nextPlayerId)) {
+            console.log(`[DEBUG] -> ${nextPlayerId} está ativo.`);
+            if (!gameState.playersAllIn.has(nextPlayerId)) {
+                console.log(`[DEBUG] -> ${nextPlayerId} não está all-in.`);
+                if (!gameState.playersWhoActed.has(nextPlayerId) || (gameState.apostasRodada[nextPlayerId] || 0) < gameState.apostaAtual) {
+                    console.log(`[DEBUG] -> DECISÃO: ${nextPlayerId} PRECISA AGIR!`);
+                    gameState.currentPlayerIndex = gameState.ativos.indexOf(nextPlayerId);
+                    
+                    if (nextPlayerId === botPlayer.BOT_ID) {
+                        console.log('[DEBUG] É a vez do BOT. Chamando a IA...');
+                        await client.sendMessage(session.groupId, `Vez de *${getPlayerNameById(nextPlayerId, session.players)}* 🤖`);
+                        await new Promise(resolve => setTimeout(resolve, 2000));
+                        const context = { position: getBotPosition(session) };
+                        const commandText = botPlayer.decideAction(session, context);
+                        const fakeMessage = { from: session.groupId, author: botPlayer.BOT_ID, body: commandText, client: client, reply: (text) => client.sendMessage(session.groupId, text) };
+                        // A forma correta de chamar o handler é através do playerActions
+                        const playerActions = require('./playerActions');
+                        await playerActions.handleGameCommand(fakeMessage, session, client);
+                    } else {
+                        console.log(`[DEBUG] É a vez de um humano. Enviando mensagem de turno...`);
+                        await enviarMensagemDeTurno(session, client);
+                    }
+                    console.log('[DEBUG] --- Fim de avancarTurnoApostas (ação passada) ---');
+                    return;
+                }
+            }
+        }
+    }
+
+    console.log('[DEBUG] ERRO: O loop terminou sem encontrar um próximo jogador. Forçando o avanço da etapa.');
+    await client.sendMessage(session.groupId, 'Rodada de apostas encerrada (fallback)!');
+    await avancarEtapa(session, client);
+}
+
+
+// --- FUNÇÕES DE AÇÃO DO JOGADOR ---
+
+async function handleCheck(session, playerId, client) {
+    const gameState = session.gameState;
+    if (gameState.apostaAtual > (gameState.apostasRodada[playerId] || 0)) {
+        if (playerId !== botPlayer.BOT_ID) {
+            await client.sendMessage(playerId, `❌ Não é possível dar !mesa. Você precisa !pagar ou !apostar.`);
+        }
+        return false;
+    }
+    gameState.playersWhoActed.add(playerId);
+    await client.sendMessage(session.groupId, `*${getPlayerNameById(playerId, session.players)}* foi de !mesa.`);
+    await avancarTurnoApostas(session, client, playerId); // <-- MUDANÇA AQUI
+    return true;
+}
+
+async function handleCall(session, playerId, client) {
+    const gameState = session.gameState;
+    const playerChips = chipManager.getPlayerChips(playerId);
+    const amountToCall = gameState.apostaAtual - (gameState.apostasRodada[playerId] || 0);
+
+    if (amountToCall <= 0) {
+        if (playerId !== botPlayer.BOT_ID) await client.sendMessage(playerId, `❌ Não há aposta para pagar. Use !mesa para passar a vez.`);
+        return false;
+    }
+    
+    if (playerChips < amountToCall) {
+        return await handleAllIn(session, playerId, client);
+    }
+    chipManager.deductChips(playerId, amountToCall);
+    gameState.pote += amountToCall;
+    gameState.apostasRodada[playerId] = gameState.apostaAtual;
+    gameState.playersWhoActed.add(playerId);
+    await client.sendMessage(session.groupId, `${getPlayerNameById(playerId, session.players)} pagou (${amountToCall} fichas)✅`);
+    await avancarTurnoApostas(session, client, playerId); // <-- MUDANÇA AQUI
+    return true;
+}
+
+async function handleBet(session, playerId, amount, client) {
+    const gameState = session.gameState;
+    const playerChips = chipManager.getPlayerChips(playerId);
+    if (gameState.apostaAtual > 0) {
+        if (playerId !== botPlayer.BOT_ID) await client.sendMessage(playerId, `❌ Já existe uma aposta. Use !pagar ou !aumentar.`);
+        return false;
+    }
+    if (amount < gameState.bigBlindValue) {
+        if (playerId !== botPlayer.BOT_ID) await client.sendMessage(playerId, `❌ A aposta mínima é de ${gameState.bigBlindValue} fichas.`);
+        return false;
+    }
+    if (playerChips < amount) {
+        if (playerId !== botPlayer.BOT_ID) await client.sendMessage(playerId, `❌ Você não tem fichas suficientes. Considere !allin.`);
+        return false;
+    }
+    chipManager.deductChips(playerId, amount);
+    gameState.pote += amount;
+    gameState.apostasRodada[playerId] = amount;
+    gameState.apostaAtual = amount;
+    gameState.ultimoApostador = playerId;
+    gameState.playersWhoActed = new Set([playerId]);
+    await client.sendMessage(session.groupId, `💵 ${getPlayerNameById(playerId, session.players)} apostou ${amount} fichas.`);
+    await avancarTurnoApostas(session, client, playerId); // <-- MUDANÇA AQUI
+    return true;
+}
+
+async function handleRaise(session, playerId, amount, client) {
+    const gameState = session.gameState;
+    const playerChips = chipManager.getPlayerChips(playerId);
+    const playerBetInRound = gameState.apostasRodada[playerId] || 0;
+    const currentBet = gameState.apostaAtual;
+    if (currentBet === 0) {
+        if (playerId !== botPlayer.BOT_ID) await client.sendMessage(playerId, `❌ Não há aposta para aumentar. Use !apostar.`);
+        return false;
+    }
+    if (amount <= currentBet) {
+        if (playerId !== botPlayer.BOT_ID) await client.sendMessage(playerId, `❌ O valor do aumento (${amount}) deve ser maior que a aposta atual (${currentBet}).`);
+        return false;
+    }
+    const raiseAmount = amount - currentBet;
+    if (raiseAmount < gameState.minRaiseAmount) {
+        if (playerId !== botPlayer.BOT_ID) await client.sendMessage(playerId, `❌ O aumento deve ser de pelo menos ${gameState.minRaiseAmount} fichas.`);
+        return false;
+    }
+    const chipsNeeded = amount - playerBetInRound;
+    if (playerChips < chipsNeeded) {
+        if (playerId !== botPlayer.BOT_ID) await client.sendMessage(playerId, `❌ Você não tem fichas para aumentar para ${amount}.`);
+        return false;
+    }
+    chipManager.deductChips(playerId, chipsNeeded);
+    gameState.pote += chipsNeeded;
+    gameState.apostasRodada[playerId] = amount;
+    gameState.apostaAtual = amount;
+    gameState.ultimoApostador = playerId;
+    gameState.numRaises++;
+    gameState.minRaiseAmount = raiseAmount;
+    gameState.playersWhoActed = new Set([playerId]);
+    await client.sendMessage(session.groupId, `${getPlayerNameById(playerId, session.players)} aumentou para ${amount} fichas ⬆️`);
+    await avancarTurnoApostas(session, client, playerId); // <-- MUDANÇA AQUI
+    return true;
+}
+
+async function handleAllIn(session, playerId, client) {
+    const gameState = session.gameState;
+    const playerChips = chipManager.getPlayerChips(playerId);
+    if (playerChips <= 0) {
+        if (playerId !== botPlayer.BOT_ID) await client.sendMessage(playerId, `❌ Você não tem fichas para ir !allin.`);
+        return false;
+    }
+    const totalBetForPlayer = (gameState.apostasRodada[playerId] || 0) + playerChips;
+    chipManager.deductChips(playerId, playerChips);
+    gameState.pote += playerChips;
+    gameState.apostasRodada[playerId] = totalBetForPlayer;
+    gameState.playersAllIn.add(playerId);
+
+    let actionMessage;
+    if (totalBetForPlayer > gameState.apostaAtual) {
+        // A CORREÇÃO ESTÁ NA LINHA ABAIXO: 'apostaAtual' estava com um espaço.
+        gameState.minRaiseAmount = totalBetForPlayer - gameState.apostaAtual;
+        gameState.apostaAtual = totalBetForPlayer;
+        gameState.ultimoApostador = playerId;
+        gameState.playersWhoActed = new Set();
+        actionMessage = `🔥 ${getPlayerNameById(playerId, session.players)} foi de !allin, aumentando para ${totalBetForPlayer} fichas!`;
+    } else {
+        actionMessage = `🔥 ${getPlayerNameById(playerId, session.players)} foi de !allin com ${playerChips} fichas.`;
+    }
+    gameState.playersWhoActed.add(playerId);
+    await client.sendMessage(session.groupId, actionMessage);
+    await avancarTurnoApostas(session, client, playerId);
+    return true;
+}
+
+// --- FUNÇÕES DE MENSAGEM ---
+
+function getPlayerNameById(playerId, playersArray) {
+    const player = playersArray.find(p => p.id === playerId);
+    return player ? player.name : playerId.split('@')[0];
+}
+
+function formatarMesaVisual(mesa) {
+    const cartasVisuais = formatarCartasArray(mesa);
+    const placeholders = Array(5 - cartasVisuais.length).fill('X');
+    return [...cartasVisuais, ...placeholders].join('    ');
+}
+
+function getComandosDisponiveis(session) {
+    const gameState = session.gameState;
+    const playerId = gameState.ativos[gameState.currentPlayerIndex];
+    const playerBetInRound = gameState.apostasRodada[playerId] || 0;
+    const currentBet = gameState.apostaAtual;
+    let comandos = [];
+    if (currentBet > playerBetInRound) {
+        comandos.push('!pagar', '!aumentar <valor>');
+    } else {
+        comandos.push('!mesa', '!apostar <valor>');
+    }
+    comandos.push('!allin', '!desistir', '!ajuda');
+    return comandos.join(' | ');
+}
+
+async function enviarMensagemPreRodada(session, client) {
+    const round = session.gameState.roundCounter;
+    let message = `*Rodada #${round}* 🎲\n\n*Jogadores na mesa:*\n`;
+    session.players.forEach((player, index) => {
+        const chips = chipManager.getPlayerChips(player.id);
+        message += `${index + 1}. ${player.name} - *${chips} fichas*\n`;
+    });
+    await client.sendMessage(session.groupId, message);
+}
+
+async function enviarMensagemDeEtapa(session, client) {
+    const gameState = session.gameState;
+    const nomeEtapa = gameState.etapa.toUpperCase().replace('-', ' ');
+
+    // SE FOR PRE-FLOP, ENVIA TEXTO
+    if (gameState.etapa === 'pre-flop') {
+        let message = `*--- ${nomeEtapa} ---*\n\n`;
+        message += `Mesa: X    X    X    X    X\n\n`; // Mesa com placeholders
+        
+        const sbPlayer = session.players.find(p => p.id === gameState.sb);
+        const bbPlayer = session.players.find(p => p.id === gameState.bb);
+        if (sbPlayer && bbPlayer) {
+            const sbAmount = gameState.smallBlindValue;
+            const bbAmount = gameState.bigBlindValue;
+            message += `SB: ${sbPlayer.name} (-${sbAmount} fichas)\n`;
+            message += `BB: ${bbPlayer.name} (-${bbAmount} fichas)\n\n`;
+        }
+        message += `*Pote Total: ${gameState.pote} fichas*`;
+        await client.sendMessage(session.groupId, message);
+    } else {
+        // PARA FLOP, TURN E RIVER, ENVIA IMAGEM
+        let caption = `*--- ${nomeEtapa} ---*\n\n`;
+        caption += `*Pote Total: ${gameState.pote} fichas*`;
+
+        const imagePath = await gerarImagemCartas(gameState.mesa);
+        if (imagePath) {
+            const media = MessageMedia.fromFilePath(imagePath);
+            await client.sendMessage(session.groupId, media, { caption: caption });
+        } else {
+            // Fallback caso a imagem falhe por outro motivo
+             await client.sendMessage(session.groupId, caption + '\n\n(Erro ao gerar imagem da mesa)');
+        }
+    }
+}
+
+async function enviarMensagemDeTurno(session, client) {
+    const gameState = session.gameState;
+    const currentPlayerId = gameState.ativos[gameState.currentPlayerIndex];
+    // A função já ignora o bot, o que é perfeito.
+    if (currentPlayerId === botPlayer.BOT_ID) return;
+
+    const player = session.players.find(p => p.id === currentPlayerId);
+    if (!player) return;
+
+    const currentBet = gameState.apostaAtual;
+    const playerBetInRound = gameState.apostasRodada[currentPlayerId] || 0;
+    const amountToCall = currentBet - playerBetInRound;
+    
+    let line1 = `*Sua vez de jogar, ${player.name}!*`;
+
+    let line2 = '';
+    if (amountToCall > 0) {
+        line2 = `Aposta: *${currentBet}* | Pagar: *${amountToCall}*`;
+    } else {
+        line2 = `Aposta: *0* (Você pode dar \`!mesa\` ou \`!apostar\`)`;
+    }
+
+    const commands = getComandosDisponiveis(session);
+    const line3 = `\`\`\`${commands}\`\`\``;
+
+    const finalMessage = `${line1}\n${line2}\n${line3}`;
+
+    // 1. Envia a mensagem para o grupo (comportamento atual, mas com o nome do jogador)
+    await client.sendMessage(session.groupId, `Vez de *${player.name}* 🕓`);
+
+    // 2. NOVO: Envia a mensagem detalhada para o privado do jogador da vez
+    await client.sendMessage(currentPlayerId, finalMessage);
+}
+
+const STARTING_CHIPS = 5000; // Certifique-se que esta constante está acessível ou defina-a aqui.
+
+function prepararJogo(session) {
+    // Esta função é a "ponte". O lobby entrega a lista de jogadores,
+    // e o módulo de poker cuida de dar as fichas.
+    session.players.forEach(player => {
+        chipManager.initializePlayerChips(player.id, STARTING_CHIPS);
+    });
+    console.log('[Game] Fichas iniciais distribuídas para os jogadores.');
+}
+
+function getBotPosition(session) {
+    const { ativos, dealer, sb, bb } = session.gameState;
+    const botId = botPlayer.BOT_ID; // Você precisa ter o botPlayer importado neste arquivo
+    const numPlayers = ativos.length;
+
+    if (!session.players || session.players.length === 0) return 'UNKNOWN';
+
+    // Garante que o botPlayer foi importado no topo do poker.js
+    // Ex: const botPlayer = require('./botPlayer');
+
+    if (botId === sb) return 'SB';
+    if (botId === bb) return 'BB';
+
+    const playerOrder = session.players.map(p => p.id);
+    const botSeatIndex = playerOrder.indexOf(botId);
+    const dealerSeatIndex = playerOrder.indexOf(dealer);
+    
+    if (botSeatIndex === -1 || dealerSeatIndex === -1) return 'UNKNOWN';
+
+    const relativePosition = (botSeatIndex - dealerSeatIndex + numPlayers) % numPlayers;
+
+    if (numPlayers > 6) { // Mesa cheia (Full Ring)
+        if (relativePosition <= 2) return 'EARLY';
+        if (relativePosition < numPlayers - 1) return 'MIDDLE';
+        return 'LATE';
+    } else { // Mesa curta (6-max)
+        if (relativePosition <= 1) return 'EARLY';
+        if (relativePosition < numPlayers - 1) return 'MIDDLE';
+        return 'LATE';
+    }
+}
+
+// --- EXPORTAÇÕES ---
+
+module.exports = {
+    initializeGameState,
+    iniciarRodada,
+    avancarEtapa,
+    handleCheck,
+    handleCall,
+    handleBet,
+    handleRaise,
+    handleAllIn,
+    avancarTurnoApostas,
+    prepararJogo
+};// C:\Users\Guilherme\bot-whatsapp\games\Poker\pokerValidators.js
+
+/**
+ * Verifica se um jogo está iniciado na sessão.
+ * @param {object} session - O objeto de sessão do jogo.
+ * @returns {boolean} True se o jogo está iniciado, false caso contrário.
+ */
+function isGameStarted(session) {
+    return session.gameState?.iniciou === true;
+}
+
+/**
+ * Verifica se um jogador está participando do jogo na sessão.
+ * Agora verifica se o ID do jogador existe dentro dos objetos do array 'players'.
+ * @param {object} session - O objeto de sessão do jogo.
+ * @param {string} playerId - O ID do WhatsApp do jogador.
+ * @returns {boolean} True se o jogador está na sessão, false caso contrário.
+ */
+function isPlayerInGame(session, playerId) {
+    // Procura por um objeto no array players cujo 'id' corresponda ao playerId
+    return session && session.players && session.players.some(p => p.id === playerId);
+}
+
+/**
+ * Verifica se é a vez de um jogador agir na rodada atual.
+ * @param {object} session - O objeto de sessão do jogo.
+ * @param {string} playerId - O ID do WhatsApp do jogador.
+ * @returns {boolean} True se é a vez do jogador, false caso contrário.
+ */
+function isPlayersTurn(session, playerId) {
+    // Certifique-se de que o gameState e ativos existem antes de acessar
+    if (!session || !session.gameState || !session.gameState.ativos || session.gameState.ativos.length === 0) {
+        return false;
+    }
+    const currentPlayerId = session.gameState.ativos[session.gameState.currentPlayerIndex];
+    return playerId === currentPlayerId;
+}
+
+/**
+ * Verifica se um jogador está ativo na rodada atual (não desistiu).
+ * @param {object} session - O objeto de sessão do jogo.
+ * @param {string} playerId - O ID do WhatsApp do jogador.
+ * @returns {boolean} True se o jogador está ativo, false caso contrário.
+ */
+function isPlayerActiveInRound(session, playerId) {
+    // Certifique-se de que o gameState e ativos existem antes de acessar
+    if (!session || !session.gameState || !session.gameState.ativos) {
+        return false;
+    }
+    return session.gameState.ativos.includes(playerId);
+}
+
+/**
+ * Retorna o nome formatado de um jogador, buscando na sessão.
+ * @param {string} playerId - O ID do jogador.
+ * @param {object} session - O objeto de sessão do jogo para buscar o nome do jogador.
+ * @returns {string} O nome do jogador ou uma versão formatada do ID se o nome não for encontrado.
+ */
+function getFormattedId(playerId, session) {
+    if (!playerId) return 'N/A';
+    
+    // Tenta encontrar o jogador na lista de jogadores da sessão para obter o nome
+    const playerInSession = session?.players?.find(p => p.id === playerId);
+    
+    // Se encontrou o jogador na sessão e ele tem um nome, retorna o nome.
+    if (playerInSession && playerInSession.name) {
+        return playerInSession.name;
+    }
+    
+    // Fallback: retorna a parte numérica do ID se o nome não for encontrado na sessão
+    return playerId.split('@')[0];
+}
+
+module.exports = {
+    isGameStarted,
+    isPlayerInGame,
+    isPlayersTurn,
+    isPlayerActiveInRound,
+    getFormattedId
+};// C:\Users\Guilherme\bot-whatsapp\games\Truco\botPlayer.js
+
+const BOT_ID = 'bot_truco@cpu.bot';
+const BOT_NAME = 'BOT Zé da Roça';
+
+/**
+ * Cria um objeto de jogador para o bot.
+ * @returns {{id: string, name: string}}
+ */
+function createBotPlayer() {
+    console.log(`[TrucoBot] Criando jogador bot: ${BOT_NAME}`);
+    return { id: BOT_ID, name: BOT_NAME };
+}
+
+function decideAction(session) {
+    const gameState = session.gameState;
+    
+    // --- Lógica de Resposta ao Truco (Prioridade 1) ---
+    const botIndex = gameState.jogadores.findIndex(p => p.id === BOT_ID);
+    
+    // Se o bot não estiver no jogo por algum motivo, não faz nada.
+    if (botIndex === -1) {
+        return null; 
+    }
+    
+    // Descobre a qual time o bot pertence ('time1' ou 'time2')
+    const botTeam = (botIndex % 2 === 0) ? 'time1' : 'time2';
+
+    // Verifica se o jogo está aguardando uma resposta e se é do time do bot
+    if (gameState.status === 'aguardando_resposta_truco' && gameState.trucoState.pendingResponseFrom === botTeam) {
+        // Lógica simples: se o bot não tiver manilhas, ele corre. Senão, aceita.
+        const botHand = gameState.jogadores[botIndex].mao;
+        const hasManilha = botHand.some(carta => carta && carta[0] === gameState.manilhaValor);
+
+        if (hasManilha) {
+            console.log(`[TrucoBot] Bot do time ${botTeam} foi desafiado, TEM MANILHA e vai aceitar.`);
+            return '!aceitar';
+        } else {
+            console.log(`[TrucoBot] Bot do time ${botTeam} foi desafiado, NÃO TEM MANILHA e vai correr.`);
+            return '!correr';
+        }
+    }
+
+    // --- Lógica de Jogar Carta (Prioridade 2) ---
+    const jogadorDaVez = gameState.jogadores[gameState.vezDoJogador];
+
+    // Verifica se é a vez do bot jogar uma carta
+    if (!jogadorDaVez || jogadorDaVez.id !== BOT_ID) {
+        return null; // Se não for a vez do bot, ele não faz nada.
+    }
+
+    // Se for a vez dele, encontra a primeira carta disponível na mão
+    const indexCartaParaJogar = jogadorDaVez.mao.findIndex(carta => carta !== null);
+    
+    if (indexCartaParaJogar !== -1) {
+        // Se encontrou uma carta, monta o comando com o número correto (índice + 1)
+        const command = `!carta ${indexCartaParaJogar + 1}`;
+        console.log(`[TrucoBot] Decisão do bot: ${command}`);
+        return command;
+    } else {
+        // Caso raro onde é a vez do bot mas ele não tem mais cartas
+        console.error(`[TrucoBot] É a vez do bot (${jogadorDaVez.name}), mas ele não tem cartas na mão.`);
+        return null;
+    }
+}
+
+module.exports = {
+    createBotPlayer,
+    decideAction,
+    BOT_ID
+};
+// C:\Users\Guilherme\bot-whatsapp\games\Truco\playerActions.js
+
+const truco = require('./truco');
+const sessionManager = require('../../sessions/sessionManager');
+
+async function handleGameCommand(message, session, client) {
+    const { from, body } = message;
+    const commandArgs = body.split(' ');
+    const command = commandArgs[0].toLowerCase();
+    
+    console.log(`[Truco Actions] Comando '${command}' recebido de ${from} na sessão ${session.groupId}`);
+
+    switch (command) {
+        case '!carta':
+            await truco.jogarCarta(message, session, client);
+            break;
+        case '!truco':
+            await truco.pedirTruco(message, session, client);
+            break;
+        case '!aceitar':
+            await truco.aceitarTruco(message, session, client);
+            break;
+        case '!correr':
+            await truco.correrDoTruco(message, session, client);
+            break;
+        case '!pede6':
+        case '!pede9':
+        case '!pede12':
+            await truco.aumentarAposta(message, session, client);
+            break;
+        
+        // --- CORREÇÃO IMPORTANTE AQUI ---
+        case '!sair':
+            // 1. Manda o módulo de Truco limpar qualquer estado interno
+            truco.limparTudo();
+            
+            // 2. AGORA, encerra a sessão no gerenciador
+            if (sessionManager.endSession(session.groupId)) {
+                await message.reply('O jogo foi encerrado.');
+            }
+            break;
+            
+        default:
+            if (command.startsWith('!')) {
+                 await message.reply("Comando de Truco não reconhecido.");
+            }
+            break;
+    }
+}
+
+module.exports = {
+    handleGameCommand
+};// C:\Users\Guilherme\bot-whatsapp\games\Truco\truco.js
+
+const sessionManager = require('../../sessions/sessionManager');
+const baralhoUtils = require('../baralhoUtils');
+const trucoBot = require('./botPlayer');
+const { MessageMedia } = require('whatsapp-web.js');
+const fs = require('fs');
+const NAIPE_EMOJI = { 's': '♠️', 'h': '♥️', 'd': '♦️', 'c': '♣️' };
+const ORDEM_FORCA_COMUM = ['4', '5', '6', '7', 'Q', 'J', 'K', 'A', '2', '3'];
+const ORDEM_FORCA_NAIPE_MANILHA = { 'd': 1, 's': 2, 'h': 3, 'c': 4 }; // Ouros, Espadas, Copas, Paus
+
+// A ordem de força das cartas para determinar a manilha (vira '3', manilha é '4')
+const ORDEM_MANILHAS = ['4', '5', '6', '7', 'Q', 'J', 'K', 'A', '2', '3'];
+
+function getManilhaValor(vira) {
+    const valorVira = vira[0];
+    const indexVira = ORDEM_MANILHAS.indexOf(valorVira);
+    // O operador de módulo (%) garante que se o vira for '3' (último), a manilha seja '4' (primeiro)
+    const indexManilha = (indexVira + 1) % ORDEM_MANILHAS.length;
+    return ORDEM_MANILHAS[indexManilha];
+}
+
+function formatarMaoParaMensagem(mao, manilhaValor) {
+    // 1. Começa a mensagem de forma limpa
+    let textoMao = 'Sua mão:\n\n';
+
+    // 2. Adiciona a lista de cartas
+    let temCarta = false;
+    mao.forEach((carta, index) => {
+        // Mostra apenas as cartas que não foram jogadas (não são nulas)
+        if (carta) {
+            temCarta = true;
+            const valor = carta[0];
+            const naipe = carta[1];
+            textoMao += `${index + 1}. ${valor}${NAIPE_EMOJI[naipe]}\n`;
+        }
+    });
+    
+    // 3. Adiciona a informação da manilha
+    textoMao += `\n*Manilha:* ${manilhaValor}\n\n`;
+
+    if (!temCarta) {
+        return 'Você não tem mais cartas para jogar.';
+    }
+    
+    // 4. Adiciona as instruções no final, onde fazem mais sentido
+    textoMao += '\nPara jogar, digite:\n`!carta <número>`\nou\n`!carta <número> hide` (para esconder)';
+    
+    return textoMao;
+}
+
+function getForcaCarta(carta, manilhaValor) {
+    const valor = carta[0];
+    const naipe = carta[1];
+
+    // Se a carta for uma manilha
+    if (valor === manilhaValor) {
+        // As manilhas têm uma força base alta (100) + a força do seu naipe
+        return 100 + ORDEM_FORCA_NAIPE_MANILHA[naipe];
+    }
+
+    // Se for uma carta comum, a força é sua posição na ordem de força
+    return ORDEM_FORCA_COMUM.indexOf(valor);
+}
+
+function prepararJogo(session) {
+    console.log(`[Truco] Preparando jogo para a sessão: ${session.groupId}`);
+    session.gameState = {
+        rodada: 1,
+        placar: { time1: 0, time2: 0 },
+        valorDaMao: 1,
+        turnosGanhos: { time1: 0, time2: 0 },
+        vencedorPrimeiroTurno: null,
+        primeiroTurnoEmpatado: false,
+        numeroDoTurno: 1,
+        jogadores: session.players.map(p => ({ ...p, mao: [] })),
+        baralho: [],
+        vira: null,
+        manilhaValor: null,
+        cartasNaMesa: [],
+        vezDoJogador: 0,
+        maoDaVez: 0,
+        status: 'aguardando_jogada',
+        trucoState: null,
+        actionLock: false,
+        botActionId: null
+    };
+    session.status = 'em_jogo';
+    console.log(`[Truco] Jogo preparado com ${session.gameState.jogadores.length} jogadores.`);
+}
+
+/**
+ * Inicia uma nova rodada de Truco.
+ * @param {object} session - A sessão do jogo.
+ * @param {object} client - O cliente do WhatsApp.
+ */
+async function iniciarRodada(session, client) {
+    console.log(`[Truco] Iniciando rodada para a sessão: ${session.groupId}`);
+    const gameState = session.gameState;
+    
+    // 1. Gerar baralho de truco e o vira
+    const baralho = baralhoUtils.gerarBaralhoTruco();
+    const vira = baralho.pop(); // Pega a carta do topo para ser o vira
+    gameState.vira = vira;
+    gameState.baralho = baralho;
+
+    // 2. Definir o valor da manilha
+    gameState.manilhaValor = getManilhaValor(vira);
+    console.log(`[Truco] Vira: ${vira} | Manilha: ${gameState.manilhaValor}`);
+    
+    // 3. Distribuir 3 cartas para cada jogador
+    for (const jogador of gameState.jogadores) {
+        jogador.mao = gameState.baralho.splice(0, 3);
+    }
+    
+    // 4. Enviar a mão para cada jogador (de forma privada)
+    for (const jogador of gameState.jogadores) {
+        if (jogador.id === trucoBot.BOT_ID) {
+            console.log(`[Truco] Mão do Bot ${jogador.name}: ${jogador.mao.join(', ')}`);
+        } else {
+            try {
+                const imagePath = await baralhoUtils.gerarImagemCartas(jogador.mao);
+                const textoMao = formatarMaoParaMensagem(jogador.mao, gameState.manilhaValor);
+
+                if (imagePath) {
+                    const media = MessageMedia.fromFilePath(imagePath);
+                    // Envia a imagem COM o novo texto como legenda
+                    await client.sendMessage(jogador.id, media, { caption: textoMao });
+                    fs.unlinkSync(imagePath);
+                } else {
+                    // Fallback caso a imagem falhe: envia só o texto
+                    await client.sendMessage(jogador.id, textoMao);
+                }
+            } catch (error) {
+                console.error(`[Truco] Falha ao enviar mão para ${jogador.id}. Enviando como texto. Erro:`, error);
+                await client.sendMessage(jogador.id, `Sua mão: ${jogador.mao.join(', ')}`);
+            }
+        }
+    }
+    
+    // 5. Anunciar o vira e de quem é a vez no grupo
+    const jogadorDaVez = gameState.jogadores[gameState.vezDoJogador];
+    let viraImagePath;
+    try {
+        viraImagePath = await baralhoUtils.gerarImagemCartas([vira]);
+        if(viraImagePath) {
+            const media = MessageMedia.fromFilePath(viraImagePath);
+            await client.sendMessage(session.groupId, media, { 
+                caption: `*Rodada ${gameState.rodada} começando!* 🎴\n\nO *vira* é este. A manilha é *${gameState.manilhaValor}*.\n\nÉ a vez de *${jogadorDaVez.name}* jogar!`
+            });
+            fs.unlinkSync(viraImagePath);
+        }
+    } catch (error) {
+        console.error('[Truco] Falha ao gerar imagem do vira. Enviando como texto. Erro:', error);
+        await client.sendMessage(session.groupId, `*Rodada ${gameState.rodada} começando!* 🎴\n\nO *vira* é *${vira}*. A manilha é *${gameState.manilhaValor}*.\n\nÉ a vez de *${jogadorDaVez.name}* jogar!`);
+    }
+
+    // 6. Atualizar status e aguardar jogada
+    gameState.status = 'aguardando_jogada';
+
+    // 7. Se for a vez do bot, aciona sua jogada
+    if (jogadorDaVez.id === trucoBot.BOT_ID) {
+        await processarAcaoBot(session, client);
+    } else {
+        // CORREÇÃO: Se o primeiro a jogar for humano, libera a trava de ação.
+        gameState.actionLock = false;
+    }
+}
+
+async function finalizarMao(session, client, motivo = { tipo: 'vitoria_normal' }) {
+    console.log(`\n[DEBUG] --- Finalizando Mão #${session.gameState.rodada} --- Motivo: ${motivo.tipo}`);    
+    const gameState = session.gameState;
+    const { placar } = gameState;
+
+    let mensagemResultado = '';
+
+    switch (motivo.tipo) {
+        case 'fuga':
+            // Caso a mão termine porque alguém correu, montamos esta mensagem.
+            const nomeTimeVencedorFuga = motivo.timeVencedor === 'time1' ? 'Time Blue 🔵' : 'Time Red 🔴';
+            const timeQueCorreu = motivo.timeVencedor === 'time1' ? 'Time Red 🔴' : 'Time Blue 🔵';
+            mensagemResultado = `*${timeQueCorreu}* correu da aposta! 🏃‍♂️\n\n*${nomeTimeVencedorFuga}* marcou *${motivo.valor}* ponto(s).`;
+            break;
+
+        case 'vitoria_normal':
+        default:
+            // Esta é a lógica original, que agora só roda para vitórias normais ou empates.
+            const { turnosGanhos, valorDaMao } = gameState;
+            let timeVencedor = null;
+            if (turnosGanhos.time1 > turnosGanhos.time2) {
+                timeVencedor = 'time1';
+                placar.time1 += valorDaMao;
+            } else if (turnosGanhos.time2 > turnosGanhos.time1) {
+                timeVencedor = 'time2';
+                placar.time2 += valorDaMao;
+            }
+
+            if (timeVencedor) {
+                const nomeTimeVencedor = timeVencedor === 'time1' ? 'Time Blue 🔵' : 'Time Red 🔴';
+                mensagemResultado = `*${nomeTimeVencedor}* venceu a mão e marcou *${valorDaMao}* ponto(s).`;
+            } else {
+                mensagemResultado = `A mão empatou! Ninguém marcou pontos.`;
+            }
+            break;
+    }
+
+    // A montagem final da mensagem é a mesma para todos os casos.
+    const mensagemPlacar = `*Fim da mão!*\n\n${mensagemResultado}\n\n*Placar:*\nTime Blue 🔵: *${placar.time1}* \nTime Red 🔴: *${placar.time2}*`;
+
+    await client.sendMessage(session.groupId, mensagemPlacar);
+
+    // O resto da função para verificar o fim do jogo e preparar a próxima mão continua igual.
+    if (placar.time1 >= 12 || placar.time2 >= 12) {
+        const nomeTimeVencedor = placar.time1 >= 12 ? 'Time Blue 🔵' : 'Time Red 🔴';
+        await client.sendMessage(session.groupId, `*O JOGO ACABOU!* 🏆\n\nParabéns ao *${nomeTimeVencedor}* pela vitória!`);
+        sessionManager.endSession(session.groupId);
+        return;
+    }
+
+    gameState.rodada++;
+    gameState.numeroDoTurno = 1;
+    gameState.valorDaMao = 1;
+    gameState.turnosGanhos = { time1: 0, time2: 0 };
+    gameState.primeiroTurnoEmpatado = false;
+    gameState.cartasNaMesa = [];
+    gameState.botActionId = null;
+    gameState.vezDoJogador = (gameState.rodada - 1) % gameState.jogadores.length;
+
+    await client.sendMessage(session.groupId, `--- Preparando a ${gameState.rodada}ª mão ---`);
+    await iniciarRodada(session, client);
+}
+
+async function finalizarTurno(session, client) {
+    const gameState = session.gameState;
+    console.log(`\n[DEBUG] --- Finalizando Turno #${gameState.numeroDoTurno} ---`);
+    console.log('[Truco] Finalizando turno. Cartas na mesa:', gameState.cartasNaMesa);
+
+    let maiorForca = -1;
+    let jogadaVencedora = null;
+
+    for (const jogada of gameState.cartasNaMesa) {
+        const forca = jogada.isHidden ? -1 : getForcaCarta(jogada.carta, gameState.manilhaValor);
+        console.log(`[FORCA_DEBUG] Carta: ${jogada.carta}, Manilha: ${gameState.manilhaValor}, Força Calculada: ${forca}`);
+        if (forca > maiorForca) {
+            maiorForca = forca;
+            jogadaVencedora = jogada;
+        }
+    }
+
+    const vencedores = gameState.cartasNaMesa.filter(j => !j.isHidden && getForcaCarta(j.carta, gameState.manilhaValor) === maiorForca);
+    let mensagemResultado = '';
+    let aMaoAcabou = false;
+
+    if (vencedores.length > 1) {
+        mensagemResultado = 'O turno *empatou*!';
+        if (gameState.numeroDoTurno === 1) {
+            gameState.primeiroTurnoEmpatado = true;
+            mensagemResultado += '\nQuem vencer o próximo turno, leva a mão!';
+        } else {
+            aMaoAcabou = true;
+        }
+    } else {
+        const jogadorVencedor = gameState.jogadores.find(p => p.id === jogadaVencedora.jogadorId);
+        const timeIndex = gameState.jogadores.findIndex(p => p.id === jogadorVencedor.id);
+        const timeVencedorTurno = (timeIndex % 2 === 0) ? 'time1' : 'time2';
+        gameState.turnosGanhos[timeVencedorTurno]++;
+        
+        if (gameState.numeroDoTurno === 1) {
+            gameState.vencedorPrimeiroTurno = timeVencedorTurno;
+        }
+
+        console.log(`[DEBUG] Vencedor do turno: ${timeVencedorTurno}. Placar de turnos: T1=${gameState.turnosGanhos.time1}, T2=${gameState.turnosGanhos.time2}`);
+        mensagemResultado = `*${jogadorVencedor.name}* (${timeVencedorTurno === 'time1' ? '🔵' : '🔴'}) venceu o turno!`;
+    }
+    
+    await client.sendMessage(session.groupId, mensagemResultado);
+
+    const { turnosGanhos, numeroDoTurno, primeiroTurnoEmpatado } = gameState;
+    const vitoriasTime1 = turnosGanhos.time1;
+    const vitoriasTime2 = turnosGanhos.time2;
+
+    if (aMaoAcabou || vitoriasTime1 === 2 || vitoriasTime2 === 2 || (primeiroTurnoEmpatado && numeroDoTurno === 2 && vitoriasTime1 !== vitoriasTime2) || numeroDoTurno === 3) {
+        await finalizarMao(session, client);
+        return;
+    }
+
+    gameState.numeroDoTurno++;
+    gameState.cartasNaMesa = [];
+    
+    let proximoJogadorIndex;
+    if (vencedores.length > 1) {
+        // REGRA CORRIGIDA: Se o turno empatou, o "mão" (quem começou) joga de novo.
+        proximoJogadorIndex = gameState.maoDaVez;
+    } else if (vitoriasTime1 === 1 && vitoriasTime2 === 1) {
+        proximoJogadorIndex = gameState.jogadores.findIndex(p => {
+            const timeDoJogador = (gameState.jogadores.findIndex(j => j.id === p.id) % 2 === 0) ? 'time1' : 'time2';
+            return timeDoJogador === gameState.vencedorPrimeiroTurno;
+        });
+    } else {
+        proximoJogadorIndex = gameState.jogadores.findIndex(p => p.id === jogadaVencedora.jogadorId);
+    }
+        
+    gameState.vezDoJogador = proximoJogadorIndex;
+    // **ATUALIZAÇÃO IMPORTANTE:** O próximo a jogar se torna o "mão" do novo turno.
+    gameState.maoDaVez = proximoJogadorIndex; 
+    
+    const proximoJogador = gameState.jogadores[proximoJogadorIndex];
+
+    await client.sendMessage(session.groupId, `--- ${gameState.numeroDoTurno}º Turno ---\nÉ a vez de *${proximoJogador.name}* jogar.`);
+    
+    if (proximoJogador.id === trucoBot.BOT_ID) {
+        await processarAcaoBot(session, client);
+    } else {
+        gameState.actionLock = false;
+    }
+}
+
+async function _avancarJogo(session, client, jogadorAtualIndex) {
+    const gameState = session.gameState;
+    const totalJogadores = gameState.jogadores.length;
+
+    if (gameState.cartasNaMesa.length === totalJogadores) {
+        await finalizarTurno(session, client);
+    } else {
+        gameState.vezDoJogador = (jogadorAtualIndex + 1) % totalJogadores;
+        const proximoJogador = gameState.jogadores[gameState.vezDoJogador];
+        await client.sendMessage(session.groupId, `É a vez de *${proximoJogador.name}*!`);
+
+        if (proximoJogador.id === trucoBot.BOT_ID) {
+            // A trava é passada para o bot, que a liberará
+            await processarAcaoBot(session, client);
+        } else {
+            // Se o próximo for humano, libera a trava agora
+            gameState.actionLock = false;
+        }
+    }
+}
+
+async function jogarCarta(message, session, client, isInternalCall = false) { // Parâmetro adicionado
+    const gameState = session.gameState;
+    
+    // Verificação modificada: só bloqueia se não for uma chamada interna
+    if (gameState.actionLock && !isInternalCall) {
+        return console.log('[Truco] Ação ignorada: Jogo está processando outra ação.');
+    }
+    gameState.actionLock = true;
+
+    try {
+        const { author, body } = message;
+        const playerId = author || message.from;
+        const jogadorAtualIndex = gameState.vezDoJogador;
+        const jogador = gameState.jogadores[jogadorAtualIndex];
+
+        if (gameState.status !== 'aguardando_jogada' || jogador.id !== playerId) {
+            if (playerId !== trucoBot.BOT_ID) {
+                message.reply("Calma, não é sua vez de jogar!");
+            }
+            gameState.actionLock = false;
+            return;
+        }
+
+        const args = body.split(' ');
+        const numeroCarta = parseInt(args[1]);
+
+        if (isNaN(numeroCarta) || numeroCarta < 1 || numeroCarta > 3 || !jogador.mao[numeroCarta - 1]) {
+            message.reply(`Carta inválida. Verifique os números disponíveis na sua mão.`);
+            gameState.actionLock = false;
+            return;
+        }
+        
+        const isHidden = args[2]?.toLowerCase() === 'hide';
+        const cartaJogada = jogador.mao[numeroCarta - 1];
+        jogador.mao[numeroCarta - 1] = null;
+        gameState.cartasNaMesa.push({ jogadorId: playerId, carta: cartaJogada, isHidden: isHidden });
+        console.log(`[Truco] Jogador ${jogador.name} jogou ${cartaJogada}${isHidden ? ' (escondida)' : ''}`);
+
+        if (isHidden) {
+            await client.sendMessage(session.groupId, `*${jogador.name}* jogou uma carta virada para baixo. 🤫`);
+        } else {
+            const imagePath = await baralhoUtils.gerarImagemCartas([cartaJogada]);
+            const media = MessageMedia.fromFilePath(imagePath);
+            await client.sendMessage(session.groupId, media, { caption: `*${jogador.name}* jogou:` });
+            fs.unlinkSync(imagePath);
+        }
+
+        if (jogador.id !== trucoBot.BOT_ID) {
+            const maoRestante = jogador.mao.filter(c => c !== null);
+            if (maoRestante.length > 0) {
+                 const imagePathMao = await baralhoUtils.gerarImagemCartas(maoRestante);
+                 const textoMao = formatarMaoParaMensagem(jogador.mao, gameState.manilhaValor);
+                 const mediaMao = MessageMedia.fromFilePath(imagePathMao);
+                 await client.sendMessage(jogador.id, mediaMao, { caption: textoMao });
+                 fs.unlinkSync(imagePathMao);
+            } else {
+                 await client.sendMessage(jogador.id, "Você jogou sua última carta!");
+            }
+        }
+        
+        // A função _avancarJogo não é mais necessária, a lógica foi reincorporada aqui
+        const totalJogadores = gameState.jogadores.length;
+        if (gameState.cartasNaMesa.length === totalJogadores) {
+            await finalizarTurno(session, client);
+        } else {
+            gameState.vezDoJogador = (jogadorAtualIndex + 1) % totalJogadores;
+            const proximoJogador = gameState.jogadores[gameState.vezDoJogador];
+            await client.sendMessage(session.groupId, `É a vez de *${proximoJogador.name}*!`);
+
+            if (proximoJogador.id === trucoBot.BOT_ID) {
+                await processarAcaoBot(session, client);
+            } else {
+                gameState.actionLock = false; // Libera trava se o próximo for humano
+            }
+        }
+
+    } catch (error) {
+        console.error("[Truco] Erro em jogarCarta:", error);
+        gameState.actionLock = false;
+    }
+}
+
+async function processarAcaoBot(session, client) {
+    const gameState = session.gameState;
+    const currentActionId = Date.now(); // 1. Gera um "carimbo" único para esta ordem.
+    gameState.botActionId = currentActionId; // 2. Atualiza o estado com o carimbo mais recente.
+
+    try {
+        await new Promise(resolve => setTimeout(resolve, 2000));
+
+        // 3. VERIFICAÇÃO PRINCIPAL: A ordem ainda é válida?
+        if (gameState.botActionId !== currentActionId) {
+            console.log(`[Truco Bot] Ação obsoleta (ID: ${currentActionId}) foi ignorada.`);
+            // A trava de ação (actionLock) será liberada pela nova ação que tornou esta obsoleta.
+            return; 
+        }
+
+        const comandoBot = trucoBot.decideAction(session);
+        if (!comandoBot) {
+            gameState.actionLock = false;
+            return;
+        }
+
+        console.log(`[Truco Bot] Processando comando do bot: "${comandoBot}"`);
+
+        // NOVO: Objeto de mensagem falso mais completo
+        const fakeMessage = {
+            author: trucoBot.BOT_ID,
+            body: comandoBot,
+            reply: (text) => { // Garante que a função reply sempre exista
+                console.log(`[Truco Bot] Tentou usar .reply com a mensagem: ${text}`);
+                // Não enviamos a mensagem, apenas registramos no log, pois é uma ação interna.
+            }
+        };
+
+        const command = comandoBot.split(' ')[0].toLowerCase();
+        
+        if (command === '!carta') {
+            await jogarCarta(fakeMessage, session, client, true);
+        } else if (command === '!aceitar') {
+            await aceitarTruco(fakeMessage, session, client);
+        } else if (command === '!correr') { // <-- ADICIONE ESTE BLOCO
+            await correrDoTruco(fakeMessage, session, client);
+        }
+    } catch (error) {
+        console.error("[Truco] Erro ao processar ação do bot:", error);
+        gameState.actionLock = false;
+    }
+}
+
+async function pedirTruco(message, session, client) {
+    const { author } = message;
+    const gameState = session.gameState;
+
+    if (gameState.status !== 'aguardando_jogada') return;
+    if (gameState.valorDaMao > 1) {
+        return message.reply("Opa, alguém já pediu truco ou mais!");
+    }
+
+    const playerIndex = gameState.jogadores.findIndex(p => p.id === author);
+    const callingTeam = (playerIndex % 2 === 0) ? 'time1' : 'time2';
+    const opponentTeam = (playerIndex % 2 === 0) ? 'time2' : 'time1';
+
+    gameState.status = 'aguardando_resposta_truco';
+    gameState.valorDaMao = 3;
+    gameState.trucoState = { challengedBy: callingTeam, pendingResponseFrom: opponentTeam };
+    
+    const opponentTeamName = opponentTeam === 'time1' ? 'Time Blue 🔵' : 'Time Red 🔴';
+    await client.sendMessage(session.groupId, `🗣️ *TRUCO!!!* \nA mão agora vale *3 pontos*! \n\nO ${opponentTeamName} deve responder com \`!aceitar\`, \`!correr\` ou \`!pede6\`.`);
+
+    // --- CORREÇÃO ADICIONADA AQUI ---
+    // Após pedir truco, verifica se o bot precisa responder
+    const botIndex = gameState.jogadores.findIndex(p => p.id === trucoBot.BOT_ID);
+    if (botIndex !== -1) {
+        const botTeam = (botIndex % 2 === 0) ? 'time1' : 'time2';
+        if (botTeam === opponentTeam) {
+            console.log(`[Truco] Bot foi desafiado pelo TRUCO. Acionando sua resposta...`);
+            await processarAcaoBot(session, client);
+        }
+    }
+}
+
+async function aceitarTruco(message, session, client) {
+    const { author } = message;
+    const gameState = session.gameState;
+
+    if (gameState.status !== 'aguardando_resposta_truco') return;
+
+    const playerIndex = gameState.jogadores.findIndex(p => p.id === author);
+    const playerTeam = (playerIndex % 2 === 0) ? 'time1' : 'time2';
+
+    if (playerTeam !== gameState.trucoState.pendingResponseFrom) {
+        return message.reply("Calma, não é seu time que responde!");
+    }
+
+    gameState.status = 'aguardando_jogada';
+    gameState.trucoState = null;
+
+    const jogadorDaVez = gameState.jogadores[gameState.vezDoJogador];
+    await client.sendMessage(session.groupId, `✅ A aposta foi aceita! O jogo continua valendo *${gameState.valorDaMao}* pontos. \n\nÉ a vez de *${jogadorDaVez.name}* jogar.`);
+
+    if (jogadorDaVez.id === trucoBot.BOT_ID) {
+        await processarAcaoBot(session, client);
+    } else {
+        // Se o próximo jogador for humano, libera a trava.
+        gameState.actionLock = false;
+    }
+}
+
+async function correrDoTruco(message, session, client) {
+    const { author } = message;
+    const gameState = session.gameState;
+    
+    if (gameState.status !== 'aguardando_resposta_truco') return;
+    
+    const playerIndex = gameState.jogadores.findIndex(p => p.id === author);
+    const playerTeam = (playerIndex % 2 === 0) ? 'time1' : 'time2';
+
+    if (playerTeam !== gameState.trucoState.pendingResponseFrom) return;
+
+    const valorCorrido = gameState.valorDaMao === 3 ? 1 : (gameState.valorDaMao / 2);
+    const timeVencedor = gameState.trucoState.challengedBy;
+    
+    // A pontuação continua sendo calculada aqui
+    gameState.placar[timeVencedor] += valorCorrido;
+
+    // A chamada para finalizarMao agora inclui um objeto 'motivo'
+    // que descreve exatamente o que aconteceu.
+    await finalizarMao(session, client, { 
+        tipo: 'fuga', 
+        timeVencedor: timeVencedor,
+        valor: valorCorrido 
+    });
+}
+
+async function aumentarAposta(message, session, client) {
+    const { author, body } = message;
+    const command = body.split(' ')[0].toLowerCase();
+    const gameState = session.gameState;
+
+    if (gameState.status !== 'aguardando_resposta_truco') return;
+    
+    const apostas = { '!pede6': 6, '!pede9': 9, '!pede12': 12 };
+    const novoValor = apostas[command];
+
+    if (!novoValor || novoValor <= gameState.valorDaMao) {
+        return message.reply("Aposta inválida!");
+    }
+
+    const playerIndex = gameState.jogadores.findIndex(p => p.id === author);
+    const playerTeam = (playerIndex % 2 === 0) ? 'time1' : 'time2';
+    
+    if (playerTeam !== gameState.trucoState.pendingResponseFrom) return;
+
+    // Inverte os papéis
+    const newOpponentTeam = gameState.trucoState.challengedBy;
+    gameState.valorDaMao = novoValor;
+    gameState.trucoState = { challengedBy: playerTeam, pendingResponseFrom: newOpponentTeam };
+    
+    const opponentTeamName = newOpponentTeam === 'time1' ? 'Time Blue 🔵' : 'Time Red 🔴';
+    await client.sendMessage(session.groupId, `CHAMOU PRA BRIGA! A aposta subiu para *${novoValor} PONTOS*! 💥\n\nE agora, ${opponentTeamName}? \`!aceitar\` ou \`!correr\`?`);
+
+    // --- CORREÇÃO ADICIONADA AQUI ---
+    // Após aumentar a aposta, verifica se o bot precisa responder
+    const botIndex = gameState.jogadores.findIndex(p => p.id === trucoBot.BOT_ID);
+    if (botIndex !== -1) {
+        const botTeam = (botIndex % 2 === 0) ? 'time1' : 'time2';
+        if (botTeam === newOpponentTeam) {
+            console.log(`[Truco] Bot foi desafiado pelo AUMENTO. Acionando sua resposta...`);
+            await processarAcaoBot(session, client);
+        }
+    }
+}
+
+function limparTudo() {
+    console.log('[Truco] Módulo de truco resetado.');
+    // Atualmente, não há estado global neste módulo para limpar,
+    // mas esta função serve como uma garantia para o futuro.
+}
+
+
+module.exports = {
+    prepararJogo,
+    iniciarRodada,
+    jogarCarta,
+    pedirTruco,
+    aceitarTruco,
+    correrDoTruco,
+    aumentarAposta,
+    getManilhaValor,
+    limparTudo
+};
+// games/Velha/botPlayer.js
+
+const BOT_ID = 'bot_velha@cpu.bot';
+const BOT_NAME = 'BOT Velhaco';
+
+/**
+ * Cria um objeto de jogador para o bot.
+ */
+function createBotPlayer() {
+    console.log(`[VelhaBot] Criando jogador bot: ${BOT_NAME}`);
+    return { id: BOT_ID, name: BOT_NAME };
+}
+
+/**
+ * Decide a próxima jogada do bot.
+ * @param {object} session - A sessão atual do jogo.
+ * @returns {string|null} O comando da jogada (ex: "!j a1") ou null se não houver jogada.
+ */
+function decideAction(session) {
+    const { historicoDeJogadas } = session.gameState;
+    const todasPosicoes = ['a1', 'a2', 'a3', 'b1', 'b2', 'b3', 'c1', 'c2', 'c3'];
+
+    // Cria um Set com as posições já ocupadas para uma verificação rápida
+    const posicoesOcupadas = new Set(historicoDeJogadas.map(j => j.posicao));
+
+    // Filtra para encontrar todas as posições livres
+    let posicoesLivres = todasPosicoes.filter(p => !posicoesOcupadas.has(p));
+
+    // Lógica para o modo infinito: se não há casas livres, a casa mais antiga fica livre
+    if (posicoesLivres.length === 0 && historicoDeJogadas.length >= 9) {
+        posicoesLivres.push(historicoDeJogadas[0].posicao);
+    }
+
+    // Se existem posições livres, escolhe uma aleatoriamente
+    if (posicoesLivres.length > 0) {
+        const jogadaAleatoria = posicoesLivres[Math.floor(Math.random() * posicoesLivres.length)];
+        const command = `!j ${jogadaAleatoria}`;
+        console.log(`[VelhaBot] Decisão do bot: ${command}`);
+        return command;
+    }
+
+    return null; // Caso não haja jogadas possíveis
+}
+
+module.exports = { createBotPlayer, decideAction, BOT_ID };// games/Velha/imageRenderer.js
+
+const { createCanvas } = require('canvas');
+const fs = require('fs');
+const path = require('path');
+
+/**
+ * Renders the Tic-Tac-Toe board state as a PNG image with improvements.
+ * - Features a more solid grid.
+ * - Watermarks for coordinates only appear on empty cells.
+ * @param {Array<Object>} historicoDeJogadas - An array of move objects, e.g., [{ posicao: 'a1', simbolo: '❌' }]
+ * @returns {Promise<string>} The file path to the generated image.
+ */
+async function renderizarVelha(historicoDeJogadas, posicaoParaDestacar = null, linhaVencedora = null) {
+    const width = 300;
+    const height = 300;
+    const canvas = createCanvas(width, height);
+    const ctx = canvas.getContext('2d');
+
+    // ... (o código para desenhar fundo, grid, peças e o destaque amarelo continua igual) ...
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fillRect(0, 0, width, height);
+    ctx.strokeStyle = '#333333';
+    ctx.lineWidth = 10;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(100, 20); ctx.lineTo(100, 280);
+    ctx.moveTo(200, 20); ctx.lineTo(200, 280);
+    ctx.moveTo(20, 100); ctx.lineTo(280, 100);
+    ctx.moveTo(20, 200); ctx.lineTo(280, 200);
+    ctx.stroke();
+
+    const jogadasFeitas = new Map(historicoDeJogadas.map(j => [j.posicao, j.simbolo]));
+    const todasPosicoes = ['a1', 'a2', 'a3', 'b1', 'b2', 'b3', 'c1', 'c2', 'c3'];
+
+    for (const posicao of todasPosicoes) {
+        const col = parseInt(posicao[1]) - 1;
+        const row = posicao.charCodeAt(0) - 'a'.charCodeAt(0);
+        const x = col * 100 + 50;
+        const y = row * 100 + 50;
+
+        if (posicao === posicaoParaDestacar) {
+            ctx.fillStyle = 'rgba(255, 235, 59, 0.6)';
+            ctx.beginPath();
+            ctx.arc(x, y, 45, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        if (jogadasFeitas.has(posicao)) {
+            const simbolo = jogadasFeitas.get(posicao);
+            ctx.lineWidth = 8;
+
+            if (simbolo === '❌') {
+                ctx.strokeStyle = '#D32F2F';
+                ctx.beginPath();
+                ctx.moveTo(x - 25, y - 25); ctx.lineTo(x + 25, y + 25);
+                ctx.moveTo(x + 25, y - 25); ctx.lineTo(x - 25, y + 25);
+                ctx.stroke();
+            } else { // '⭕'
+                ctx.strokeStyle = '#1976D2';
+                ctx.beginPath();
+                ctx.arc(x, y, 30, 0, Math.PI * 2);
+                ctx.stroke();
+            }
+        } else {
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.1)';
+            ctx.font = 'bold 32px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(posicao.toUpperCase(), x, y);
+        }
+    }
+
+
+    // --- MELHORIA ADICIONADA: DESENHA A LINHA DA VITÓRIA ---
+    // Este bloco só executa se uma linha vencedora for fornecida
+    if (linhaVencedora && linhaVencedora.length === 3) {
+        const posicoesCoord = {};
+        todasPosicoes.forEach(pos => {
+            const col = parseInt(pos[1]) - 1;
+            const row = pos.charCodeAt(0) - 'a'.charCodeAt(0);
+            posicoesCoord[pos] = { x: col * 100 + 50, y: row * 100 + 50 };
+        });
+
+        const [startPos, , endPos] = linhaVencedora;
+        const startCoords = posicoesCoord[startPos];
+        const endCoords = posicoesCoord[endPos];
+
+        ctx.beginPath();
+        ctx.moveTo(startCoords.x, startCoords.y);
+        ctx.lineTo(endCoords.x, endCoords.y);
+        ctx.strokeStyle = '#FFD700'; // Cor de ouro para a linha da vitória
+        ctx.lineWidth = 14;
+        ctx.lineCap = 'round';
+        ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
+        ctx.shadowBlur = 10;
+        ctx.stroke();
+    }
+
+    const tempDir = path.join(__dirname, '..', '..', 'temp_images');
+    if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
+    const filePath = path.join(tempDir, `velha_${Date.now()}.png`);
+    fs.writeFileSync(filePath, canvas.toBuffer('image/png'));
+    
+    return filePath;
+}
+
+module.exports = { renderizarVelha };
+// Em games/Velha/playerActions.js
+
+const jogoDaVelha = require('./velha.js');
+const sessionManager = require('../../sessions/sessionManager'); // Importamos o sessionManager
+
+async function handleGameCommand(message, session, client) {
+    const command = message.body.split(' ')[0].toLowerCase();
+
+    switch (command) {
+        case '!jogar':
+        case '!j': // Atalho
+            await jogoDaVelha.processarJogada(message, session, client);
+            break;
+        
+        // ADICIONAMOS A LÓGICA PARA SAIR
+        case '!sair':
+            if (sessionManager.endSession(session.groupId)) {
+                await message.reply('O Jogo da Velha foi encerrado.');
+            }
+            break;
+    }
+}
+
+module.exports = { handleGameCommand };// games/Velha/velha.js
+
+const sessionManager = require('../../sessions/sessionManager');
+const { MessageMedia } = require('whatsapp-web.js');
+const path = require('path');
+const fs = require('fs');
+
+// CORREÇÃO 1: Importamos o botPlayer e o imageRenderer no topo do arquivo.
+const botPlayer = require('./botPlayer');
+const { renderizarVelha } = require('./imageRenderer.js');
+
+const SIMBOLOS = ['❌', '⭕'];
+const VITORIAS = [
+    ['a1', 'a2', 'a3'], ['b1', 'b2', 'b3'], ['c1', 'c2', 'c3'], // Linhas
+    ['a1', 'b1', 'c1'], ['a2', 'b2', 'c2'], ['a3', 'b3', 'c3'], // Colunas
+    ['a1', 'b2', 'c3'], ['a3', 'b2', 'c1']  // Diagonais
+];
+
+function prepararJogo(session) {
+    console.log(`[JogoDaVelha] Preparando jogo para ${session.groupId}`);
+    session.gameState = {
+        jogadores: [session.players[0].id, session.players[1].id],
+        historicoDeJogadas: [],
+        vezDoJogador: 0
+    };
+}
+
+async function montarDisplay(gameState, posicaoParaDestacar, linhaVencedora = null) {
+    try {
+        // E passa essa informação para o renderizador
+        const imagePath = await renderizarVelha(gameState.historicoDeJogadas, posicaoParaDestacar, linhaVencedora);
+        const media = MessageMedia.fromFilePath(imagePath);
+        fs.unlinkSync(imagePath);
+        return media;
+    } catch (error) {
+        console.error("Erro ao montar display do Jogo da Velha:", error);
+        return "❌ Desculpe, tive um problema para desenhar o tabuleiro. 😥";
+    }
+}
+
+function verificarVencedor(gameState) {
+    const jogadorAtualId = gameState.jogadores[gameState.vezDoJogador];
+    const posicoesDoJogador = new Set(
+        gameState.historicoDeJogadas
+            .filter(j => j.jogadorId === jogadorAtualId)
+            .map(j => j.posicao)
+    );
+
+    if (posicoesDoJogador.size < 3) return null;
+
+    // ALTERAÇÃO: Agora a função retorna um objeto com o vencedor E a linha da vitória
+    for (const vitoria of VITORIAS) {
+        if (vitoria.every(p => posicoesDoJogador.has(p))) {
+            return { vencedor: jogadorAtualId, linha: vitoria };
+        }
+    }
+    return null;
+}
+
+// CORREÇÃO 2: A função 'dispararAcaoBot' agora enxerga o 'botPlayer' importado no topo.
+async function dispararAcaoBot(session, client) {
+    const comandoBot = botPlayer.decideAction(session);
+    if (comandoBot) {
+        const fakeMessage = {
+            author: botPlayer.BOT_ID,
+            body: comandoBot,
+            reply: () => {},
+        };
+        await processarJogada(fakeMessage, session, client);
+    }
+}
+
+async function processarJogada(message, session, client) {
+    // ... (o início da função, com as validações, continua o mesmo) ...
+    const { author, body } = message;
+    const { gameState } = session;
+    const jogadorAtualId = gameState.jogadores[gameState.vezDoJogador];
+    const botPlayer = require('./botPlayer');
+
+    if (author === botPlayer.BOT_ID) {
+        await new Promise(resolve => setTimeout(resolve, 1500));
+    }
+    
+    if (author !== jogadorAtualId) {
+        return message.reply("Calma, não é a sua vez de jogar!");
+    }
+
+    const posicao = body.split(' ')[1]?.toLowerCase();
+    const posicoesValidas = /^[a-c][1-3]$/;
+
+    if (!posicao || !posicoesValidas.test(posicao)) {
+        return message.reply("Posição inválida. Use o formato `a1`, `b2`, etc.");
+    }
+    
+    const posicaoOcupada = gameState.historicoDeJogadas.some(j => j.posicao === posicao);
+    if (posicaoOcupada) {
+        return message.reply("Essa posição já está ocupada! Escolha outra.");
+    }
+    
+    gameState.historicoDeJogadas.push({
+        posicao,
+        jogadorId: jogadorAtualId,
+        simbolo: SIMBOLOS[gameState.vezDoJogador]
+    });
+
+    const resultadoVitoria = verificarVencedor(gameState);
+
+    if (resultadoVitoria) {
+        const jogadorVencedor = session.players.find(p => p.id === resultadoVitoria.vencedor);
+        const legenda = `🏆 Fim de jogo! *${jogadorVencedor.name}* (${SIMBOLOS[gameState.vezDoJogador]}) venceu!`;
+        
+        // Passamos a linha da vitória para a função de montar o display
+        const display = await montarDisplay(gameState, null, resultadoVitoria.linha); 
+        await client.sendMessage(session.groupId, display, { caption: legenda });
+        
+        sessionManager.endSession(session.groupId);
+        return;
+    }
+
+    // O resto da função (se não houver vitória) continua exatamente igual...
+    let infoPecaRemovida = null;
+    if (gameState.historicoDeJogadas.length > 8) { 
+        const jogadaRemovida = gameState.historicoDeJogadas.shift(); 
+        infoPecaRemovida = `O tabuleiro encheu! A jogada mais antiga (${jogadaRemovida.simbolo} em ${jogadaRemovida.posicao.toUpperCase()}) foi removida.`;
+    }
+
+    let posicaoParaDestacar = null;
+    if (gameState.historicoDeJogadas.length === 8) {
+        posicaoParaDestacar = gameState.historicoDeJogadas[0].posicao;
+    }
+
+    let legenda = '';
+    if (infoPecaRemovida) {
+        legenda += `${infoPecaRemovida}\n\n`;
+    }
+    
+    gameState.vezDoJogador = (gameState.vezDoJogador + 1) % 2;
+    const proximoJogador = session.players.find(p => p.id === gameState.jogadores[gameState.vezDoJogador]);
+    legenda += `É a vez de *${proximoJogador.name}* (${SIMBOLOS[gameState.vezDoJogador]}). Use:\n \`!jogar <posição>\`.`;
+    
+    const display = await montarDisplay(gameState, posicaoParaDestacar, null);
+    await client.sendMessage(session.groupId, display, { caption: legenda });
+    
+    const proximoJogadorId = gameState.jogadores[gameState.vezDoJogador];
+    if (proximoJogadorId === botPlayer.BOT_ID) {
+        await dispararAcaoBot(session, client);
+    }
+}
+
+// CORREÇÃO 3: Exportamos todas as funções necessárias
+module.exports = { prepararJogo, processarJogada, montarDisplay, dispararAcaoBot };// games/baralhoUtils.js
+const { renderizarCartas } = require('./imageRenderer');
+const path = require('path');
+const fs = require('fs');
+
+/**
+ * Gera um baralho padrão de 52 cartas e o embaralha.
+ * @returns {string[]} Um array de strings representando o baralho embaralhado.
+ */
+function gerarBaralho() {
+    const naipes = ['s', 'h', 'd', 'c'];   // spades, hearts, diamonds, clubs
+    const valores = ['2', '3', '4', '5', '6', '7', '8', '9', 'T', 'J', 'Q', 'K', 'A']; // 'T' para 10
+    const baralho = [];
+
+    for (let naipe of naipes) {
+        for (let valor of valores) {
+            baralho.push(`${valor}${naipe}`);
+        }
+    }
+
+    // Embaralhar (Algoritmo Fisher-Yates)
+    for (let i = baralho.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [baralho[i], baralho[j]] = [baralho[j], baralho[i]];
+    }
+
+    return baralho;
+}
+
+/**
+ * Gera uma imagem de um conjunto de cartas e a salva em um diretório temporário.
+ * @param {string[]} cartas - Array de cartas a serem renderizadas (ex: ['As', 'Kd']).
+ * @returns {Promise<string|null>} O caminho para a imagem gerada, ou null se houver erro.
+ */
+async function gerarImagemCartas(cartas) {
+    if (!cartas || cartas.length === 0) {
+        // Se precisar de uma imagem para "mão vazia", pode ser tratado aqui.
+        // Por enquanto, vamos retornar null para evitar erros.
+        console.log('[BaralhoUtils] Tentativa de gerar imagem para um array de cartas vazio.');
+        return null;
+    }
+    try {
+        // Garante que o diretório para imagens temporárias exista
+        const tempDir = path.join(__dirname, '..', 'temp_images');
+        if (!fs.existsSync(tempDir)) {
+            fs.mkdirSync(tempDir, { recursive: true });
+        }
+
+        // Gera um nome de arquivo único para evitar conflitos
+        const fileName = `cartas_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.png`;
+        const outputPath = path.join(tempDir, fileName);
+
+        // Chama o renderizador de imagem
+        await renderizarCartas(cartas, outputPath);
+
+        return outputPath;
+    } catch (error) {
+        console.error('Erro ao gerar imagem das cartas:', error);
+        return null;
+    }
+}
+
+function gerarBaralhoTruco() {
+    const naipes = ['s', 'h', 'd', 'c']; // espadas, copas, ouros, paus
+    // No truco, removemos 8, 9, 10. O 'T' representa o 10 no baralho padrão.
+    const valores = ['2', '3', '4', '5', '6', '7', 'J', 'Q', 'K', 'A'];
+    const baralho = [];
+    for (let naipe of naipes) {
+        for (let valor of valores) {
+            baralho.push(`${valor}${naipe}`);
+        }
+    }
+
+    // Embaralhar (Algoritmo Fisher-Yates)
+    for (let i = baralho.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [baralho[i], baralho[j]] = [baralho[j], baralho[i]];
+    }
+
+    console.log('[BaralhoUtils] Baralho de Truco com 40 cartas gerado e embaralhado.');
+    return baralho;
+}
+
+
+module.exports = { gerarBaralho, gerarBaralhoTruco, gerarImagemCartas };
+
+// games/imageRenderer.js
+const { createCanvas } = require('canvas');
+const fs = require('fs');
+const path = require('path');
+
+// Mapeamento de valores para o que será exibido na carta
+const valorMap = {
+    'T': '10', 'J': 'J', 'Q': 'Q', 'K': 'K', 'A': 'A'
+};
+
+// Mapeamento de naipes para ícones e cores
+const naipeInfo = {
+    's': { icone: '♠', cor: 'black' }, // Espadas
+    'h': { icone: '♥', cor: 'red' },   // Copas
+    'd': { icone: '♦', cor: 'red' },   // Ouros
+    'c': { icone: '♣', cor: 'black' }  // Paus
+};
+
+/**
+ * Desenha uma única carta em um contexto de canvas.
+ * @param {CanvasRenderingContext2D} ctx - O contexto 2D do canvas onde a carta será desenhada.
+ * @param {string} carta - A string da carta (ex: 'As', 'Td').
+ * @param {number} x - A posição X inicial para desenhar a carta.
+ * @param {number} y - A posição Y inicial para desenhar a carta.
+ */
+function desenharCarta(ctx, carta, x, y) {
+    const larguraCarta = 100;
+    const alturaCarta = 140;
+    const raioBorda = 10;
+
+    const valor = carta[0];
+    const naipe = carta[1];
+
+    const info = naipeInfo[naipe] || { icone: '?', cor: 'black' };
+    const valorVisual = valorMap[valor] || valor;
+
+    // Sombra da carta
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
+    ctx.shadowBlur = 10;
+    ctx.shadowOffsetX = 5;
+    ctx.shadowOffsetY = 5;
+
+    // Fundo branco da carta com bordas arredondadas
+    ctx.fillStyle = 'white';
+    ctx.beginPath();
+    ctx.moveTo(x + raioBorda, y);
+    ctx.lineTo(x + larguraCarta - raioBorda, y);
+    ctx.quadraticCurveTo(x + larguraCarta, y, x + larguraCarta, y + raioBorda);
+    ctx.lineTo(x + larguraCarta, y + alturaCarta - raioBorda);
+    ctx.quadraticCurveTo(x + larguraCarta, y + alturaCarta, x + larguraCarta - raioBorda, y + alturaCarta);
+    ctx.lineTo(x + raioBorda, y + alturaCarta);
+    ctx.quadraticCurveTo(x, y + alturaCarta, x, y + alturaCarta - raioBorda);
+    ctx.lineTo(x, y + raioBorda);
+    ctx.quadraticCurveTo(x, y, x + raioBorda, y);
+    ctx.closePath();
+    ctx.fill();
+
+    // Resetar sombra para não afetar o texto
+    ctx.shadowColor = 'transparent';
+
+    // Desenhar valor e naipe
+    ctx.fillStyle = info.cor;
+    
+    // Valor no canto superior esquerdo
+    ctx.font = 'bold 24px Arial';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    ctx.fillText(valorVisual, x + 8, y + 5);
+
+    // Naipe grande no centro
+    ctx.font = '60px Arial';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(info.icone, x + larguraCarta / 2, y + alturaCarta / 2);
+}
+
+/**
+ * Renderiza uma imagem contendo várias cartas lado a lado em um fundo de mesa.
+ * @param {string[]} cartas - Array de strings de cartas. Ex: ['As', 'Kd', 'Qc'].
+ * @param {string} outputPath - O caminho completo para salvar o arquivo de imagem.
+ * @returns {Promise<string>} O caminho do arquivo salvo.
+ */
+async function renderizarCartas(cartas, outputPath) {
+    const larguraCarta = 100;
+    const alturaCarta = 140;
+    const espacamento = 15; // Espaço entre as cartas
+    const padding = 20;     // Espaço ao redor do conjunto de cartas
+
+    const numCartas = cartas.length;
+    if (numCartas === 0) {
+        // Se não houver cartas, podemos criar uma imagem vazia ou retornar null
+        // Por enquanto, vamos criar uma pequena imagem de "mesa vazia"
+        const canvasVazio = createCanvas(200, 180);
+        const ctxVazio = canvasVazio.getContext('2d');
+        ctxVazio.fillStyle = '#006400'; // Verde escuro
+        ctxVazio.fillRect(0, 0, 200, 180);
+        ctxVazio.fillStyle = 'white';
+        ctxVazio.font = '20px Arial';
+        ctxVazio.textAlign = 'center';
+        ctxVazio.fillText('Mesa Vazia', 100, 90);
+        fs.writeFileSync(outputPath, canvasVazio.toBuffer('image/png'));
+        return outputPath;
+    }
+
+    const larguraTotal = (larguraCarta * numCartas) + (espacamento * (numCartas - 1)) + (padding * 2);
+    const alturaTotal = alturaCarta + (padding * 2);
+
+    const canvas = createCanvas(larguraTotal, alturaTotal);
+    const ctx = canvas.getContext('2d');
+
+    // Fundo da mesa (verde)
+    ctx.fillStyle = '#006400'; // Verde escuro
+    ctx.fillRect(0, 0, larguraTotal, alturaTotal);
+
+    // Desenha cada carta
+    cartas.forEach((carta, index) => {
+        const x = padding + index * (larguraCarta + espacamento);
+        const y = padding;
+        desenharCarta(ctx, carta, x, y);
+    });
+
+    // Salva o canvas como um arquivo de imagem PNG
+    const buffer = canvas.toBuffer('image/png');
+    fs.writeFileSync(outputPath, buffer);
+
+    console.log(`[ImageRenderer] Imagem salva em: ${outputPath}`);
+    return outputPath;
+}
+
+module.exports = { renderizarCartas };
+// C:\Users\Guilherme\bot-whatsapp\games\lobby.js
+
+const poker = require('./Poker/poker');
+const truco = require('./Truco/truco'); // Importamos o módulo principal do Truco
+const botPlayer = require('./Poker/botPlayer');
+const sessionManager = require('../sessions/sessionManager');
+const trucoBot = require('./Truco/botPlayer');
+const forca = require('./Forca/forca');
+const velha = require('./Velha/velha')
+const forcaBot = require('./Forca/botPlayer');
+
+// --- LÓGICA PRINCIPAL DO LOBBY ---
+
+
+async function criarLobby(session, client) {
+    session.status = 'lobby';
+    console.log(`[Lobby] Criando lobby para o jogo: ${session.game}`);
+    
+    // Prepara a estrutura de jogadores específica do jogo
+    if (session.game === 'truco') {
+        session.players = {
+            timeBlue: [],
+            timeRed: []
+        };
+    } else { // Para poker e outros jogos futuros
+        session.players = [];
+    }
+
+    const lobbyMessage = gerarMensagemLobby(session);
+    await client.sendMessage(session.groupId, lobbyMessage);
+}
+
+async function handleLobbyCommand(message, session, client) {
+    const command = message.body.split(' ')[0].toLowerCase();
+    const playerId = message.author || message.from; // <-- VARIÁVEL MOVIDA PARA CIMA
+
+    switch (command) {
+        case '!sair':
+            if (playerId !== session.creatorId) {
+                // Se não for o criador, podemos remover apenas o jogador
+                const playerIndex = session.players.findIndex(p => p.id === playerId);
+                if (playerIndex > -1) {
+                    const playerName = session.players[playerIndex].name;
+                    session.players.splice(playerIndex, 1);
+                    sessionManager.unmapPlayersInGroup([playerId]);
+                    await message.reply(`*${playerName}* saiu do lobby.`);
+                    // Atualiza a mensagem do lobby para o grupo
+                    const lobbyMessage = gerarMensagemLobby(session);
+                    await client.sendMessage(session.groupId, lobbyMessage);
+                }
+                // Ignora silenciosamente se a pessoa não estiver no lobby
+            } else {
+                // Se for o criador, encerra o lobby para todos
+                if (sessionManager.endSession(session.groupId)) {
+                    await message.reply('O lobby foi encerrado pelo criador.');
+                }
+            }
+            return;
+            
+        case '!ajuda':
+        case '!comandos':
+        case '!help':
+            await enviarAjudaLobby(session, message);
+            return;
+    }
+
+    // Direciona para o handler específico do jogo
+    if (session.game === 'poker') {
+        await handlePokerLobby(message, session, client);
+    } else if (session.game === 'truco') {
+        await handleTrucoLobby(message, session, client);
+    } else if (session.game === 'forca') {
+        await handlePokerLobby(message, session, client);
+    } else if (session.game === 'velha') {
+        await handlePokerLobby(message, session, client);
+    }
+}
+
+function gerarMensagemLobby(session) {
+    if (session.game === 'poker') {
+        return gerarMensagemLobbyPoker(session);
+    } else if (session.game === 'truco') {
+        return gerarMensagemLobbyTruco(session);
+    } else if (session.game === 'forca') {
+        return gerarMensagemLobbyForca(session);
+    } else if (session.game === 'velha') { 
+        return gerarMensagemLobbyVelha(session);
+    }
+    return 'Lobby em modo desconhecido.';
+}
+
+// --- LÓGICAS ESPECÍFICAS PARA CADA JOGO ---
+
+// =================================================================
+// POKER
+// =================================================================
+
+function gerarMensagemLobbyPoker(session) {
+    const MAX_PLAYERS = 8;
+    let playersList = '';
+    for (let i = 0; i < MAX_PLAYERS; i++) {
+        const player = session.players[i];
+        playersList += `${i + 1}. ${player ? player.name : '<vazio>'}\n`;
+    }
+
+    let comandos = '[ !entrar <seu_nome> ]  [ !ajuda ]';
+    if (session.players.length >= 1) {
+        comandos += '  *[ !iniciar ]*';
+    }
+
+    let lobbyMessage = `*Mesa de Poker Criada!* 🃏\n\n*Jogadores:*\n${playersList}\n---\n${comandos}`;
+
+    // Adiciona o aviso se apenas 1 jogador estiver na mesa
+    if (session.players.length === 1) {
+        lobbyMessage += '\n\n*Aviso:* Se iniciar agora, um BOT completará a mesa! 🤖';
+    }
+
+    return lobbyMessage;
+}
+
+async function handlePokerLobby(message, session, client) {
+    const command = message.body.split(' ')[0].toLowerCase();
+    switch (command) {
+        case '!entrar':
+            await adicionarJogadorPoker(message, session, client);
+            break;
+        case '!iniciar':
+            // Direciona para o iniciador correto
+            if (session.game === 'poker') {
+                await iniciarJogoPoker(message, session, client);
+            } else if (session.game === 'forca') {
+                // Certifique-se de que ele está chamando a função correta
+                await iniciarJogoForca(message, session, client);
+            } else if (session.game === 'velha') {
+                await iniciarJogoVelha(message, session, client);
+            }
+            break;
+    }
+}
+
+const MAX_NAME_LENGTH = 20; // Limite de 20 caracteres para nomes
+
+async function adicionarJogadorPoker(message, session, client) {
+    const { author, body } = message;
+    const playerId = author || message.from;
+    const MAX_PLAYERS = session.game === 'velha' ? 2 : 8;
+
+    if (session.players.length >= MAX_PLAYERS) {
+        return message.reply('❌ A sala está cheia!');
+    }
+    if (session.players.some(p => p.id === playerId)) {
+        return message.reply('✔️ Você já está na mesa.');
+    }
+    
+    // --- CORREÇÃO ADICIONADA AQUI ---
+    let playerName = body.split(' ').slice(1).join(' ').trim();
+    if (!playerName) {
+        return message.reply('⚠️ Por favor, digite seu nome. Ex: `!entrar João`');
+    }
+
+    if (playerName.length > MAX_NAME_LENGTH) {
+        playerName = playerName.substring(0, MAX_NAME_LENGTH);
+        await message.reply(`Seu nome era muito longo e foi encurtado para: *${playerName}*`);
+    }
+    // --- FIM DA CORREÇÃO ---
+
+    session.players.push({ id: playerId, name: playerName });
+    sessionManager.mapPlayerToGroup(playerId, session.groupId);
+    const lobbyMessage = gerarMensagemLobby(session);
+    await client.sendMessage(session.groupId, lobbyMessage);
+}
+
+async function iniciarJogoPoker(message, session, client) {
+    const playerId = message.author || message.from;
+
+    if (session.players.length > 0 && session.players[0].id !== playerId) {
+        return message.reply('Apenas o primeiro jogador que entrou na mesa pode iniciar o jogo.');
+    }
+    if (session.players.length === 0) {
+        return client.sendMessage(session.groupId, '⚠️ Não é possível iniciar um jogo sem jogadores!');
+    }
+    if (session.players.length === 1) {
+        const bot = botPlayer.createBotPlayer();
+        session.players.push(bot);
+        await client.sendMessage(session.groupId, `🤖 ${bot.name} entrou para completar a mesa.`);
+    }
+
+    session.status = 'em_jogo';
+    poker.prepararJogo(session); // Chama a preparação específica do poker
+    await client.sendMessage(session.groupId, '🎲 O jogo de *Poker* está começando! Boa sorte a todos.');
+    await poker.iniciarRodada(session, client);
+}
+
+
+// =================================================================
+// TRUCO
+// =================================================================
+
+function gerarMensagemLobbyTruco(session) {
+    let blueList = '';
+    let redList = '';
+
+    for (let i = 0; i < 2; i++) {
+        const playerBlue = session.players.timeBlue[i];
+        blueList += `${i + 1}. ${playerBlue ? playerBlue.name : '<vazio>'}\n`;
+        const playerRed = session.players.timeRed[i];
+        redList += `${i + 1}. ${playerRed ? playerRed.name : '<vazio>'}\n`;
+    }
+
+    let comandos = '[ !entrar <seu_nome> <blue ou red> ]  [ !ajuda ]';
+    const blueCount = session.players.timeBlue.length;
+    const redCount = session.players.timeRed.length;
+    const totalPlayers = blueCount + redCount;
+
+    // Nova condição para iniciar: 1 jogador (vs Bot), 1v1 ou 2v2
+    if (totalPlayers === 1 || (blueCount === 1 && redCount === 1) || (blueCount === 2 && redCount === 2)) {
+        comandos += '  *[ !iniciar ]*';
+    }
+
+    let lobbyMessage = `*Mesa de Truco Criada!* 🎴\n\n*Jogadores:*\n\n*Time Blue* 🔵\n${blueList}\n*Time Red* 🔴\n${redList}\n---\n${comandos}`;
+
+    // Adiciona o aviso se apenas 1 jogador estiver na mesa
+    if (totalPlayers === 1) {
+        lobbyMessage += '\n\n*Aviso:* Se iniciar agora, você jogará contra um BOT! 🤖';
+    }
+
+    return lobbyMessage;
+}
+
+async function handleTrucoLobby(message, session, client) {
+    const command = message.body.split(' ')[0].toLowerCase();
+    switch (command) {
+        case '!entrar':
+            await adicionarJogadorTruco(message, session, client);
+            break;
+        case '!iniciar':
+            await iniciarJogoTruco(message, session, client);
+            break;
+    }
+}
+
+async function adicionarJogadorTruco(message, session, client) {
+    // ... (validações iniciais) ...
+    const { author, body } = message;
+    const playerId = author || message.from;
+    const args = body.split(' ').slice(1);
+    
+    if (session.players.timeBlue.some(p => p.id === playerId) || session.players.timeRed.some(p => p.id === playerId)) {
+        return message.reply('✔️ Você já está em um time.');
+    }
+    if (args.length === 0) {
+        return message.reply('⚠️ Por favor, digite seu nome. Ex: `!entrar João`');
+    }
+
+    let playerName;
+    let timeEscolhido = args[args.length - 1].toLowerCase();
+    let timeObject;
+
+    if (timeEscolhido === 'blue' || timeEscolhido === 'red') {
+        playerName = args.slice(0, -1).join(' ').trim();
+    } else {
+        playerName = args.join(' ').trim();
+    }
+
+    if (!playerName) {
+        return message.reply('⚠️ Por favor, digite seu nome. Ex: `!entrar João blue`');
+    }
+
+    // --- CORREÇÃO ADICIONADA AQUI ---
+    if (playerName.length > MAX_NAME_LENGTH) {
+        playerName = playerName.substring(0, MAX_NAME_LENGTH);
+        await message.reply(`Seu nome era muito longo e foi encurtado para: *${playerName}*`);
+    }
+    // --- FIM DA CORREÇÃO ---
+
+    // ... (Restante da lógica para escolher o time e adicionar o jogador) ...
+    // Cenário 1: Jogador especificou um time
+    if (timeEscolhido === 'blue' || timeEscolhido === 'red') {
+        timeObject = (timeEscolhido === 'blue') ? session.players.timeBlue : session.players.timeRed;
+        if (timeObject.length >= 2) {
+            return message.reply(`❌ O time ${timeEscolhido} já está cheio!`);
+        }
+    } else { // Cenário 2: Alocação automática
+        if (session.players.timeBlue.length <= session.players.timeRed.length && session.players.timeBlue.length < 2) {
+            timeObject = session.players.timeBlue;
+            await message.reply(`Você foi alocado automaticamente ao time *Blue 🔵*!`);
+        } else if (session.players.timeRed.length < 2) {
+            timeObject = session.players.timeRed;
+            await message.reply(`Você foi alocado automaticamente ao time *Red 🔴*!`);
+        } else {
+            return message.reply('❌ A mesa está cheia! Não há vagas em nenhum time.');
+        }
+    }
+    
+    timeObject.push({ id: playerId, name: playerName });
+    sessionManager.mapPlayerToGroup(playerId, session.groupId);
+    const lobbyMessage = gerarMensagemLobby(session);
+    await client.sendMessage(session.groupId, lobbyMessage);
+}
+
+async function iniciarJogoTruco(message, session, client) {
+    const playerId = message.author || message.from;
+    const criadorId = session.players.timeBlue[0]?.id || session.players.timeRed[0]?.id;
+
+    if (criadorId && criadorId !== playerId) {
+        return message.reply('Apenas o primeiro jogador que entrou na mesa pode iniciar o jogo.');
+    }
+
+    let blueCount = session.players.timeBlue.length;
+    let redCount = session.players.timeRed.length;
+    const totalPlayers = blueCount + redCount;
+
+    // LÓGICA DO BOT: Se apenas 1 jogador iniciar, adiciona o bot
+    if (totalPlayers === 1) {
+        const bot = trucoBot.createBotPlayer();
+        if (blueCount === 1) {
+            session.players.timeRed.push(bot);
+            redCount++;
+        } else {
+            session.players.timeBlue.push(bot);
+            blueCount++;
+        }
+        await client.sendMessage(session.groupId, `🤖 ${bot.name} entrou para o time adversário!`);
+    }
+
+    // Condição de início: 1x1 (incluindo bot) ou 2x2
+    if (!((blueCount === 1 && redCount === 1) || (blueCount === 2 && redCount === 2))) {
+        return message.reply('⚠️ Não é possível iniciar! O jogo deve ser 1x1 ou 2x2.');
+    }
+    
+    // **A CORREÇÃO ESTÁ AQUI**
+    // 1. Cria um novo array para os jogadores ordenados
+    const jogadoresOrdenados = [];
+    const timeBlue = session.players.timeBlue;
+    const timeRed = session.players.timeRed;
+
+    // 2. Popula o novo array na ordem correta (alternando times)
+    for (let i = 0; i < 2; i++) {
+        if (timeBlue[i]) jogadoresOrdenados.push(timeBlue[i]);
+        if (timeRed[i]) jogadoresOrdenados.push(timeRed[i]);
+    }
+    
+    // 3. AGORA SIM, substitui a estrutura de times pelo array plano de jogadores
+    session.players = jogadoresOrdenados;
+
+    session.status = 'em_jogo';
+    truco.prepararJogo(session);
+    await client.sendMessage(session.groupId, '🎲 O jogo de *Truco* está começando! Boa sorte a todos.');
+    await truco.iniciarRodada(session, client);
+}
+
+// =================================================================
+// FORCA
+// =================================================================
+
+function gerarMensagemLobbyForca(session) {
+    const MAX_PLAYERS = 8;
+    let playersList = '';
+    for (let i = 0; i < MAX_PLAYERS; i++) {
+        const player = session.players[i];
+        playersList += `${i + 1}. ${player ? player.name : '<vazio>'}\n`;
+    }
+
+    let comandos = '[ !entrar <seu_nome> ]  [ !ajuda ]';
+    if (session.players.length >= 1) {
+        comandos += '  *[ !iniciar ]*';
+    }
+
+    let lobbyMessage = `*Sala de Jogo da Forca Criada!* 💀\n\n*Jogadores na Fila:*\n${playersList}\n---\n${comandos}`;
+
+    if (session.players.length === 1) {
+        lobbyMessage += '\n\n*Aviso:* Se iniciar agora, você jogará sozinho contra o Bot!';
+    } else if (session.players.length > 1) {
+        lobbyMessage += `\n\n*Aviso:* Se iniciar agora, o jogo será em grupo e *${session.players[0].name}* escolherá a primeira palavra!`;
+    }
+
+    return lobbyMessage;
+}
+
+// Adicione esta nova função para iniciar o jogo
+async function iniciarJogoForca(message, session, client) {
+    const playerId = message.author || message.from;
+
+    if (session.players.length > 0 && session.players[0].id !== playerId) {
+        return message.reply('Apenas o primeiro jogador que entrou na sala pode iniciar o jogo.');
+    }
+    if (session.players.length === 0) {
+        return client.sendMessage(session.groupId, '⚠️ Não é possível iniciar um jogo sem jogadores!');
+    }
+
+    // --- LÓGICA DO BOT ADICIONADA ---
+    // Se apenas um jogador humano iniciar, adicionamos o bot para competir.
+    if (session.players.length === 1) {
+        const bot = forcaBot.createBotPlayer();
+        session.players.push(bot);
+        await client.sendMessage(session.groupId, `🤖 ${bot.name} entrou na sala para adivinhar a sua palavra!`);
+    }
+    // --- FIM DA LÓGICA DO BOT ---
+
+    session.status = 'em_jogo';
+    forca.prepararJogo(session); // Prepara o estado do jogo
+    await client.sendMessage(session.groupId, '💀 O *Jogo da Forca* está começando!');
+    await forca.iniciarRodada(session, client); // Inicia a primeira rodada
+}
+
+async function handlePokerLobby(message, session, client) {
+    const command = message.body.split(' ')[0].toLowerCase();
+    switch (command) {
+        case '!entrar':
+            await adicionarJogadorPoker(message, session, client);
+            break;
+        case '!iniciar':
+            // Direciona para o iniciador correto
+            if (session.game === 'poker') {
+                await iniciarJogoPoker(message, session, client);
+            } else if (session.game === 'forca') {
+                await iniciarJogoForca(message, session, client);
+            } else if (session.game === 'velha') { // <<< Adicione este else if
+                await iniciarJogoVelha(message, session, client);
+            }
+            break;
+    }
+}
+
+// =================================================================
+// VELHA
+// =================================================================
+
+
+function gerarMensagemLobbyVelha(session) {
+    let playersList = '1. <vazio>\n2. <vazio>\n';
+    if (session.players.length > 0) {
+        playersList = `1. ${session.players[0].name}\n`;
+        playersList += `2. ${session.players[1] ? session.players[1].name : '<vazio>'}\n`;
+    }
+
+    let comandos = '[ !entrar <seu_nome> ]  [ !ajuda ]';
+    
+    // CORREÇÃO: Mostra o botão de iniciar com 1 ou 2 jogadores
+    if (session.players.length >= 1) {
+        comandos += '  *[ !iniciar ]*';
+    }
+
+    let lobbyMessage = `*Sala de Jogo da Velha Infinito Criada!* ♾️\n\n*Jogadores (2 no total):*\n${playersList}\n---\n${comandos}`;
+    
+    // NOVO: Adiciona o aviso sobre jogar contra o bot
+    if (session.players.length === 1) {
+        const botPlayer = require('./Velha/botPlayer');
+        lobbyMessage += `\n\n*Aviso:* Se iniciar agora, você jogará contra o *BOT Velhaco*! 🤖`;
+    }
+    
+    return lobbyMessage;
+}
+
+async function iniciarJogoVelha(message, session, client) {
+    const botPlayer = require('./Velha/botPlayer');
+
+    if (session.players.length === 1) {
+        const bot = botPlayer.createBotPlayer();
+        session.players.push(bot);
+        await client.sendMessage(session.groupId, `🤖 ${bot.name} entrou para jogar contra você!`);
+    }
+
+    if (session.players.length !== 2) {
+        return message.reply('⚠️ É preciso exatamente 2 jogadores para iniciar o Jogo da Velha.');
+    }
+
+    session.status = 'em_jogo';
+    const jogoDaVelha = require('./Velha/velha');
+    jogoDaVelha.prepararJogo(session);
+
+    const primeiroJogador = session.players[0];
+    const legenda = `♾️ O *Jogo da Velha Infinito* está começando!\n\nÉ a vez de *${primeiroJogador.name}* (❌). Use \`!jogar <posição>\`, ex: \`!jogar a1\`.`;
+    
+    // ALTERAÇÃO: Passamos 'null' para garantir que não haja destaque no início
+    const displayInicial = await jogoDaVelha.montarDisplay(session.gameState, null);
+    await client.sendMessage(session.groupId, displayInicial, { caption: legenda });
+
+    if (primeiroJogador.id === botPlayer.BOT_ID) {
+        await jogoDaVelha.dispararAcaoBot(session, client);
+    }
+}
+
+// =================================================================
+// AJUDA
+// =================================================================
+
+async function enviarAjudaLobby(session, message) {
+    let ajudaMsg = '';
+    if (session.game === 'poker') {
+        ajudaMsg = `📖 *Comandos do Lobby de Poker:*\n` +
+                   `- !entrar <seu_nome> - Entra na mesa\n` +
+                   `- !iniciar - Começa o jogo com os jogadores atuais\n` +
+                   `- !fimjogo - Fecha o lobby\n\n` +
+                   `Se apenas 1 jogador iniciar, um bot entrará na partida.`;
+    } else if (session.game === 'truco') {
+        ajudaMsg = `📖 *Comandos do Lobby de Truco:*\n` +
+                `- !entrar <seu_nome> - Entra no primeiro time com vaga\n` +
+                `- !entrar <seu_nome> <blue ou red> - Entra em um time específico\n` +
+                `- !iniciar - Começa o jogo (requer 1x1 ou 2x2)\n` +
+                `- !sair - Fecha o lobby`;
+    } else if (session.game === 'velha') {
+        ajudaMsg = `📖 *Comandos do Lobby do Jogo da Velha:*\n` +
+                   `- !entrar <seu_nome> - Entra na partida (limite de 2 jogadores)\n` +
+                   `- !iniciar - Começa o jogo com 2 jogadores\n` +
+                   `- !sair - Fecha o lobby`;
+    }
+    await message.reply(ajudaMsg);
+}
+
+
+module.exports = {
+    criarLobby,
+    handleLobbyCommand
+};
+// C:\Users\Guilherme\bot-whatsapp\sessions\sessionManager.js
+
+const sessions = {};
+const playerSessionMap = {};
+
+function createSession(groupId, game, creatorId) { // Adicionado creatorId
+    if (!sessions[groupId]) {
+        sessions[groupId] = {
+            groupId: groupId,
+            creatorId: creatorId, // <-- NOVA PROPRIEDADE
+            game: game,
+            players: [], 
+            gameState: null, 
+        };
+        console.log(`Sessão criada para o grupo: ${groupId} para o jogo: ${game} por ${creatorId}`);
+    }
+    return sessions[groupId];
+}
+
+function getSession(groupId) {
+    return sessions[groupId];
+}
+
+function endSession(groupId) {
+    const session = sessions[groupId];
+    if (session) {
+        let playerIds = [];
+
+        // NOVO: Verifica se session.players é um array (Poker) ou um objeto (Truco)
+        if (Array.isArray(session.players)) {
+            // Lógica para o Poker (e para o Truco quando o jogo já começou)
+            playerIds = session.players.map(p => p.id);
+        } else if (session.players && typeof session.players === 'object') {
+            // Lógica para o lobby do Truco
+            const bluePlayers = session.players.timeBlue || [];
+            const redPlayers = session.players.timeRed || [];
+            playerIds = [...bluePlayers.map(p => p.id), ...redPlayers.map(p => p.id)];
+        }
+
+        unmapPlayersInGroup(playerIds);
+        delete sessions[groupId];
+        console.log(`Sessão encerrada para o grupo: ${groupId}`);
+        return true;
+    }
+    return false;
+}
+
+// Adaptação para notificar estado do jogo para todos os jogadores na sessão (sem saldos de fichas)
+async function notificarEstado(session, client) {
+    if (session && session.gameState) {
+        const poker = require('../games/Poker/poker'); 
+        const statusMessage = poker.buildStatusMessage(session.gameState, session.players);
+        await client.sendMessage(session.groupId, statusMessage);
+    }
+}
+
+// Nova função para notificar o status COMPLETO, incluindo saldos
+async function notificarStatusCompleto(session, client) {
+    if (session && session.gameState) {
+        const poker = require('../games/Poker/poker'); 
+        const statusMessage = poker.buildStatusMessage(session.gameState, session.players);
+        const chipBalanceMessage = poker.buildChipBalanceMessage(session.players);
+        
+        await client.sendMessage(session.groupId, `${statusMessage}\n\n---\n${chipBalanceMessage}`);
+    }
+}
+
+function mapPlayerToGroup(playerId, groupId) {
+    playerSessionMap[playerId] = groupId;
+    console.log(`[Player Map] Jogador ${playerId.split('@')[0]} mapeado para o grupo ${groupId}`);
+}
+
+/**
+ * Encontra o ID do grupo em que um jogador está ativo.
+ * @param {string} playerId ID do jogador.
+ * @returns {string|null} O ID do grupo ou null se não for encontrado.
+ */
+function getGroupFromPlayer(playerId) {
+    return playerSessionMap[playerId] || null;
+}
+
+/**
+ * Remove todos os jogadores de um grupo do mapa.
+ * @param {string[]} playerIds Array de IDs de jogadores a serem removidos.
+ */
+function unmapPlayersInGroup(playerIds) {
+    if (!playerIds || playerIds.length === 0) return;
+    playerIds.forEach(pId => {
+        if (playerSessionMap[pId]) {
+            delete playerSessionMap[pId];
+            console.log(`[Player Map] Jogador ${pId.split('@')[0]} desmapeado.`);
+        }
+    });
+}
+
+module.exports = {
+    createSession,
+    getSession,
+    endSession,
+    mapPlayerToGroup,
+    getGroupFromPlayer,
+    unmapPlayersInGroup,
+    notificarEstado,
+    notificarStatusCompleto
+};
+/**
+ * Função de log inteligente que adiciona prefixo com nome do grupo e do autor.
+ * @param {object | null} message - O objeto da mensagem da whatsapp-web.js.
+ * @param  {...any} logTexts - Os textos ou objetos a serem logados, como em um console.log normal.
+ */
+async function log(message, ...logTexts) {
+    let prefix = `[${new Date().toLocaleTimeString('pt-BR')}]`; // Adiciona a hora ao log
+
+    if (message && typeof message.getChat === 'function') {
+        try {
+            const chat = await message.getChat();
+            if (chat.isGroup) {
+                const contact = await message.getContact();
+                prefix += ` [${chat.name}] [${contact.pushname}]`;
+            } else {
+                // Mensagem privada
+                const contact = await message.getContact();
+                prefix += ` [PV - ${contact.pushname}]`;
+            }
+        } catch (e) {
+            // Se houver erro ao buscar dados, não quebra o log
+            prefix += ' [Contexto indisponível]';
+        }
+    }
+
+    console.log(prefix, ...logTexts);
+}
+
+module.exports = { log };

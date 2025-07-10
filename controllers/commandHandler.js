@@ -8,8 +8,9 @@ const pokerActions = require('../games/Poker/playerActions');
 const trucoActions = require('../games/Truco/playerActions');
 const forcaActions = require('../games/Forca/playerActions');
 const velhaActions = require('../games/Velha/playerActions');
+const unoActions = require('../games/Uno/playerActions');
 const handleMusica = require('./musicaHandler');
-const JOGOS_VALIDOS = ['poker', 'truco', 'forca', 'velha'];
+const JOGOS_VALIDOS = ['poker', 'truco', 'forca', 'velha', 'uno'];
 
 async function handleCommand(message, client) {
     try {
@@ -147,6 +148,9 @@ async function handleCommand(message, client) {
                 case 'velha':
                     await velhaActions.handleGameCommand(message, session, client);
                     break;
+                case 'uno':
+                    await unoActions.handleGameCommand(message, session, client);
+                    break;    
             }
             return;
         }
