@@ -41,7 +41,8 @@ async function handleCommand(message, client) {
                                   `• Poker\n` +
                                   `• Truco\n` +
                                   `• Forca\n` +
-                                  `• Velha\n\n` +
+                                  `• Velha\n` +
+                                  `• Uno (Em testes)\n\n` +
                                   `---\n\n` +
                                   `*Outros comandos:*\n` +
                                   `• \`!figurinha\` - Responda a uma imagem para criar um sticker.\n` +
@@ -96,6 +97,18 @@ async function handleCommand(message, client) {
 
         let session = isGroup ? sessionManager.getSession(from) : sessionManager.getSession(sessionManager.getGroupFromPlayer(from));
         
+        if (command === '!sair') {
+            if (session) {
+                const gameName = session.game.charAt(0).toUpperCase() + session.game.slice(1);
+                if (sessionManager.endSession(session.groupId)) {
+                    await message.reply(`✅ O jogo de *${gameName}* foi encerrado.`);
+                }
+            } else {
+              await message.reply('Não há nenhum jogo ou lobby em andamento para sair.');
+          }
+          return;
+        }
+        
         if (command === '!jogo') {
             if (session) {
             return message.reply(`❌ Um jogo de *${session.game}* já está em andamento. Para encerrar, use \`!sair\`.`);
@@ -124,7 +137,7 @@ async function handleCommand(message, client) {
         
         if (!session) {
             if (command.startsWith('!')) {
-                 await message.reply('Nenhum jogo em andamento. Para começar, digite:\n`!jogo <nome do jogo>\n Para mais informações digite:`!botzap` `');
+                 await message.reply('Digite:`!botzap` para mais informações');
             }
             return;
         }

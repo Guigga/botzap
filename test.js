@@ -1,21 +1,15 @@
-// test.js - Teste de Estresse para Rotação e Saída de Jogadores na Forca
+// test.js - Teste de Lógica para o Jogo de UNO (2 Jogadores)
 
 const handleCommand = require('./controllers/commandHandler.js');
 const sessionManager = require('./sessions/sessionManager.js');
+const unoBot = require('./games/Uno/botPlayer');
 
 // --- SIMULAÇÃO DO AMBIENTE DO BOT ---
 const mockClient = {
     sendMessage: async (chatId, content, options = {}) => {
         const target = chatId.split('@')[0];
         console.log(`\n+++++++++++++ MENSAGEM DO BOT PARA ${target} +++++++++++++`);
-        
-        if (typeof content === 'object' && content.mimetype && content.mimetype.startsWith('image/')) {
-            const caption = options.caption || "(sem legenda)";
-            console.log(`[IMAGEM ENVIADA] 🖼️`);
-            console.log(`Legenda: "${caption.replace(/\n/g, ' ')}"`);
-        } else {
-            console.log(content);
-        }
+        console.log(String(content).replace(/\n\n/g, '\n')); // Compacta linhas em branco
         console.log(`++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++\n`);
     }
 };
@@ -26,90 +20,71 @@ function createMockMessage(body, author, fromGroup) {
         author,
         from: fromGroup,
         reply: async (text) => await mockClient.sendMessage(fromGroup, text),
+        getChat: async () => ({ isGroup: fromGroup.endsWith('@g.us'), name: 'Grupo de Teste' }),
+        getContact: async () => ({ pushname: author.split('@')[0] })
     };
 }
 
-// --- O EXECUTOR DOS TESTES ---
-async function runTests() {
-    console.log('--- INICIANDO TESTE DE ESTRESSE DO JOGO DA FORCA ---\n');
+const GROUP_ID = '123456789@g.us';
+const HUMAN_ID = `player1@c.us`;
 
-    const GROUP_ID = '123456789@g.us';
-    const USERS = Array.from({ length: 8 }, (_, i) => `${i + 1}11111111@c.us`);
+const sendCommand = async (command, userId) => {
+    const message = createMockMessage(command, userId, GROUP_ID);
+    console.log(`\n>>> [TESTE] Usuário ${userId.split('@')[0]} enviou: "${command}"`);
+    await handleCommand(message, mockClient);
+    await new Promise(res => setTimeout(res, 1500)); // Pausa para processamento
+};
 
-    const sendCommand = async (command, userId, isPrivate = false) => {
-        const from = isPrivate ? userId : GROUP_ID;
-        const message = createMockMessage(command, userId, from);
-        console.log(`\n>>> [TESTE] Usuário ${userId.split('@')[0]} enviou: "${command}" ${isPrivate ? 'no PV' : 'no Grupo'}`);
-        await handleCommand(message, mockClient);
-        await new Promise(res => setTimeout(res, 100)); 
-    };
 
-    // =================================================================
-    // CENÁRIO 1: JOGO DA FORCA (4 JOGADORES) COM SAÍDA
-    // =================================================================
-    console.log('\n\n--- CENÁRIO 1: FORCA COM 4 JOGADORES E SAÍDA DE JOGADOR ---');
-    await sendCommand('!jogo forca', USERS[0]);
-    await sendCommand('!entrar P1', USERS[0]);
-    await sendCommand('!entrar P2', USERS[1]);
-    await sendCommand('!entrar P3', USERS[2]);
-    await sendCommand('!entrar P4', USERS[3]);
-    await sendCommand('!iniciar', USERS[0]);
+// --- CENÁRIOS DE TESTE ---
+
+async function testeDeAcumulo() {
+    console.log('\n\n--- CENÁRIO 1: Testando Acúmulo de +2 ---');
+    await sendCommand('!jogo uno', HUMAN_ID);
+    await sendCommand('!entrar Humano', HUMAN_ID);
+    await sendCommand('!iniciar', HUMAN_ID);
+
+    console.log("\n>>> [AÇÃO] O Humano vai jogar a carta 1. Assumimos que é um +2.");
+    console.log(">>> [VERIFICAÇÃO] O log deve mostrar que o Bot comprou 2 cartas ou jogou outro +2.");
+    await sendCommand('!jogar 1', HUMAN_ID);
+
+    // Aguarda a vez do bot e a próxima vez do humano
+    await new Promise(res => setTimeout(res, 3000)); 
+
+    console.log("\n>>> [AÇÃO] O Humano vai jogar a carta 1 novamente. Assumimos que é um +4.");
+     console.log(">>> [VERIFICAÇÃO] O log deve mostrar o efeito acumulado e que a vez passou para o Bot sob este efeito.");
+    await sendCommand('!jogar 1 azul', HUMAN_ID);
     
-    // --- Rodada 1 (P1 define) ---
-    console.log('\n>>> [TESTE] Rodada 1: P1 define a palavra.');
-    await sendCommand('!palavra TESTE', USERS[0], true);
-    await sendCommand('!letra T', USERS[1]); // P2 joga
-    console.log('\n>>> [TESTE] P3 vai sair do jogo no meio da rodada.');
-    await sendCommand('!sair', USERS[2]); // P3 sai do jogo
-    await sendCommand('!letra E', USERS[3]); // P4 joga (o bot deve pular o P3)
-    await sendCommand('!letra S', USERS[1]); // P2 joga e ganha a rodada
+    await sendCommand('!sair', HUMAN_ID);
+    console.log('--- CENÁRIO 1 FINALIZADO ---');
+}
 
-    // --- Rodada 2 (P2 define) ---
-    console.log('\n>>> [TESTE] Rodada 2: A vez de definir deve passar para P2.');
-    await sendCommand('!palavra VITORIA', USERS[1], true);
-    console.log('\n>>> [TESTE] O próximo a jogar deve ser P4, pois P3 saiu e P1 já foi.');
-    await sendCommand('!letra A', USERS[3]); // P4 joga
-    await sendCommand('!letra I', USERS[0]); // P1 joga
+async function testeDeReembaralhamento() {
+    console.log('\n\n--- CENÁRIO 2: Testando Reembaralhamento ---');
+    await sendCommand('!jogo uno', HUMAN_ID);
+    await sendCommand('!entrar Humano', HUMAN_ID);
+    await sendCommand('!iniciar', HUMAN_ID);
 
-    console.log('\n\n--- CENÁRIO 1 FINALIZADO ---');
-    await sendCommand('!sair', USERS[0]); // Encerrando o jogo para o próximo cenário
-
-
-    // =================================================================
-    // CENÁRIO 2: JOGO DA FORCA (8 JOGADORES) TESTANDO A ROTAÇÃO COMPLETA
-    // =================================================================
-    console.log('\n\n--- CENÁRIO 2: FORCA COM 8 JOGADORES E ROTAÇÃO ---');
-    if (sessionManager.getSession(GROUP_ID)) {
-        console.error('!!! FALHA: Sessão anterior não foi encerrada corretamente !!!');
-        return;
+    console.log("\n>>> [AÇÃO] Forçando o baralho a acabar. O Humano comprará cartas repetidamente.");
+    console.log(">>> [AVISO] Mensagens de 'Opa, não é a sua vez' são normais, pois o Bot também joga.");
+    for (let i = 0; i < 45; i++) {
+        // O bot jogará entre os comandos do humano. O teste força a compra quando for a vez do humano.
+        await sendCommand('!comprar', HUMAN_ID);
+        await sendCommand('!passar', HUMAN_ID);
     }
-    await sendCommand('!jogo forca', USERS[0]);
-    for (let i = 0; i < 8; i++) {
-        await sendCommand(`!entrar Player${i + 1}`, USERS[i]);
-    }
-    await sendCommand('!iniciar', USERS[0]);
-
-    // --- Rodada 1 (Player1 define) ---
-    console.log('\n>>> [TESTE] Rodada 1/8: Player1 define a palavra.');
-    await sendCommand('!palavra JOGO', USERS[0], true);
-    await sendCommand('!letra O', USERS[1]); // Player2 acerta e ganha
-
-    // --- Rodada 2 (Player2 define) ---
-    console.log('\n>>> [TESTE] Rodada 2/8: Vez de Player2 definir.');
-    await sendCommand('!palavra BOT', USERS[1], true);
-    await sendCommand('!letra B', USERS[2]); // Player3 acerta e ganha
-
-    // --- Rodada 3 (Player3 define) ---
-    console.log('\n>>> [TESTE] Rodada 3/8: Vez de Player3 definir.');
-    await sendCommand('!palavra TESTE', USERS[2], true);
-    console.log('\n>>> [TESTE] Player5 vai sair do jogo.');
-    await sendCommand('!sair', USERS[4]); // Player5 sai
-    await sendCommand('!letra T', USERS[3]); // Player4 joga
+    
+    console.log("\n>>> [VERIFICAÇÃO] VERIFIQUE NO LOG ACIMA A MENSAGEM: 'O baralho acabou! Reembaralhando as cartas da mesa...'");
+    await sendCommand('!sair', HUMAN_ID);
+    console.log('--- CENÁRIO 2 FINALIZADO ---');
+}
 
 
-    console.log('\n\n--- SUÍTE DE TESTES FINALIZADA ---');
-    console.log('VERIFIQUE O LOG ACIMA PARA CONFIRMAR SE A ROTAÇÃO DE JOGADORES E A SAÍDA FUNCIONARAM.');
+async function runAllTests() {
+    await testeDeAcumulo();
+    await new Promise(res => setTimeout(res, 2000)); // Pausa entre cenários
+    await testeDeReembaralhamento();
+    console.log('\n\n--- TODOS OS TESTES FORAM CONCLUÍDOS ---');
 }
 
 // Executa os testes
-runTests();
+runAllTests();
