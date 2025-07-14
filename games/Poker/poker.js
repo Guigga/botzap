@@ -513,7 +513,7 @@ function getComandosDisponiveis(session) {
     } else {
         comandos.push('!mesa', '!apostar <valor>');
     }
-    comandos.push('!allin', '!desistir', '!ajuda');
+    comandos.push('!allin', '!correr', '!ajuda');
     return comandos.join(' | ');
 }
 
@@ -565,7 +565,8 @@ async function enviarMensagemDeEtapa(session, client) {
 async function enviarMensagemDeTurno(session, client) {
     const gameState = session.gameState;
     const currentPlayerId = gameState.ativos[gameState.currentPlayerIndex];
-    // A função já ignora o bot, o que é perfeito.
+    
+    // A função continua ignorando o bot.
     if (currentPlayerId === botPlayer.BOT_ID) return;
 
     const player = session.players.find(p => p.id === currentPlayerId);
@@ -575,25 +576,23 @@ async function enviarMensagemDeTurno(session, client) {
     const playerBetInRound = gameState.apostasRodada[currentPlayerId] || 0;
     const amountToCall = currentBet - playerBetInRound;
     
-    let line1 = `*Sua vez de jogar, ${player.name}!*`;
+    // Monta a mensagem, agora direcionada ao grupo
+    let line1 = `*${player.name}*! 🕓`;
 
     let line2 = '';
     if (amountToCall > 0) {
-        line2 = `Aposta: *${currentBet}* | Pagar: *${amountToCall}*`;
+        line2 = `Aposta atual: *${currentBet}* | Para pagar: *${amountToCall}*`;
     } else {
-        line2 = `Aposta: *0* (Você pode dar \`!mesa\` ou \`!apostar\`)`;
+        line2 = `Aposta atual: *0* (Pode dar \`!mesa\` ou \`!apostar\`)`;
     }
 
     const commands = getComandosDisponiveis(session);
     const line3 = `\`\`\`${commands}\`\`\``;
 
-    const finalMessage = `${line1}\n${line2}\n${line3}`;
+    const finalMessage = `${line1}\n${line2}\n\n${line3}`;
 
-    // 1. Envia a mensagem para o grupo (comportamento atual, mas com o nome do jogador)
-    await client.sendMessage(session.groupId, `Vez de *${player.name}* 🕓`);
-
-    // 2. NOVO: Envia a mensagem detalhada para o privado do jogador da vez
-    await client.sendMessage(currentPlayerId, finalMessage);
+    // Envia a mensagem detalhada diretamente para o grupo
+    await client.sendMessage(session.groupId, finalMessage);
 }
 
 const STARTING_CHIPS = 5000; // Certifique-se que esta constante está acessível ou defina-a aqui.

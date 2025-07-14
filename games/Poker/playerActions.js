@@ -4,6 +4,7 @@ const poker = require('./poker');
 const sessionManager = require('../../sessions/sessionManager');
 const pokerValidators = require('./pokerValidators');
 const chipManager = require('../../economy/chipManager');
+const botPlayer = require('./botPlayer');
 
 
 // Nova função "mãe" para lidar com TODOS os comandos durante o jogo
@@ -11,35 +12,73 @@ async function handleGameCommand(message, session, client) {
     const { from, body } = message;
     const commandArgs = body.split(' ');
     const command = commandArgs[0].toLowerCase();
-    
-    console.log(`[Truco Actions] Comando '${command}' recebido de ${from} na sessão ${session.groupId}`);
+    const playerId = message.author || message.from;
 
-    // Nova lógica para identificar comandos numéricos
-    const isNumberCommand = command.startsWith('!') && command.length > 1 && !isNaN(parseInt(command.substring(1)));
+    console.log(`[Poker Actions] Comando '${command}' recebido de ${from} na sessão ${session.groupId}`);
 
-    if (isNumberCommand) {
-        // Para manter a compatibilidade com a função `jogarCarta` que já temos,
-        // nós "traduzimos" o comando !1 para !carta 1 internamente.
-        const number = command.substring(1);
-        const hideOrNot = commandArgs.slice(1).join(' '); // Pega o resto, como "hide"
-        message.body = `!carta ${number} ${hideOrNot}`;
-        await truco.jogarCarta(message, session, client);
-    } else if (command === '!truco') {
-        await truco.pedirTruco(message, session, client);
-    } else if (command === '!aceitar') {
-        await truco.aceitarTruco(message, session, client);
-    } else if (command === '!correr') {
-        await truco.correrDoTruco(message, session, client);
-    } else if (['!pede6', '!pede9', '!pede12'].includes(command)) {
-        await truco.aumentarAposta(message, session, client);
-    } else if (command === '!sair') {
-        if (sessionManager.endSession(session.groupId)) {
-            await message.reply('O jogo foi encerrado.');
+    // Validação para impedir o jogador de agir se não estiver no jogo
+    if (!pokerValidators.isPlayerInGame(session, playerId)) {
+        return message.reply("Você não está participando deste jogo.");
+    }
+
+    // Comandos que podem ser usados a qualquer momento pelo jogador
+    switch (command) {
+        case '!sair':
+            return await handleLeaveCommand(message, session, client);
+        case '!status':
+            await sessionManager.notificarStatusCompleto(session, client);
+            return;
+        case '!ajuda':
+        case '!help':
+            const helpMessage = getPokerHelpMessage(session);
+            return message.reply(helpMessage);
+    }
+
+    // Validações que impedem a ação se não for a vez do jogador
+    if (!pokerValidators.isPlayersTurn(session, playerId)) {
+        // O bot não deve responder a si mesmo que não é sua vez.
+        if (playerId !== botPlayer.BOT_ID) {
+            return message.reply("Não é sua vez de jogar!");
         }
-    } else {
-        if (command.startsWith('!')) {
-             await message.reply("Comando de Truco não reconhecido.");
-        }
+        return; // Sai silenciosamente se for o bot tentando jogar fora de hora
+    }
+
+    if (!pokerValidators.isPlayerActiveInRound(session, playerId)) {
+        // Não precisa responder, pois o jogador já recebeu a confirmação de que correu
+        return;
+    }
+
+    // Ações de jogo (só podem ser executadas na vez do jogador)
+    switch (command) {
+        case '!mesa':
+        case '!check':
+            await handleCheckCommand(message, session, client);
+            break;
+        case '!pagar':
+        case '!call':
+            await handleCallCommand(message, session, client);
+            break;
+        case '!apostar':
+        case '!bet':
+            await handleBetCommand(message, session, client);
+            break;
+        case '!aumentar':
+        case '!raise':
+            await handleRaiseCommand(message, session, client);
+            break;
+        case '!allin':
+            await handleAllInCommand(message, session, client);
+            break;
+        case '!correr':
+        case '!fold':
+            await handleFold(message, session, client);
+            break;
+        default:
+            // Responde apenas se for um humano digitando um comando inválido
+            if (command.startsWith('!') && playerId !== botPlayer.BOT_ID) {
+                await message.reply("Comando de Poker não reconhecido. Digite !ajuda para ver os comandos disponíveis.");
+            }
+            break;
     }
 }
 
@@ -130,7 +169,7 @@ function getPokerHelpMessage(session) {
         helpMessage += `- !apostar <valor> - Faz uma aposta inicial\n`; 
         helpMessage += `- !aumentar <valor> - Aumenta a aposta atual\n`; 
         helpMessage += `- !allin - Aposta todas as suas fichas\n`; 
-        helpMessage += `- !desistir (ou !fold) - Sai da rodada atual\n`;
+        helpMessage += `- !correr (ou !fold) - Sai da rodada atual\n`;
     }
     helpMessage += `\n*Comandos Gerais:*\n - !fimjogo - Encerra o jogo atual\n`; 
     return helpMessage;

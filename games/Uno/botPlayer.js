@@ -11,39 +11,63 @@ function createBotPlayer() {
     return { id: BOT_ID, name: BOT_NAME };
 }
 
-/**
- * O bot decide sua próxima ação de forma aleatória entre as jogadas válidas.
- * @param {object} gameState - O estado atual do jogo.
- * @param {Array<object>} maoDoBot - As cartas na mão do bot.
- * @returns {string} O comando da jogada (ex: "!jogar 2") ou "!comprar".
- */
 function decideAction(gameState, maoDoBot) {
-    const { cartaAtual, corAtual } = gameState;
-    const jogadasPossiveis = [];
+    const { cartaAtual, corAtual, efeitoAcumulado } = gameState;
 
-    // Mapeia as jogadas válidas
+    // --- LÓGICA DE PRIORIDADE: Responder a um efeito acumulado ---
+    if (efeitoAcumulado.quantidade > 0) {
+        const cartaParaRebaterIndex = maoDoBot.findIndex(c => c.valor === efeitoAcumulado.tipo);
+
+        if (cartaParaRebaterIndex !== -1) {
+            // Encontrou uma carta para rebater o efeito!
+            const numeroCarta = cartaParaRebaterIndex + 1;
+            let comando = `!jogar ${numeroCarta}`;
+            
+            // Se a carta de resposta for um coringa, escolhe uma cor aleatória
+            if (maoDoBot[cartaParaRebaterIndex].cor === 'preto') {
+                 const cores = ['vermelho', 'amarelo', 'verde', 'azul'];
+                 const corAleatoria = cores[Math.floor(Math.random() * cores.length)];
+                 comando += ` ${corAleatoria}`;
+            }
+            console.log(`[UnoBot] Rebatendo com ${efeitoAcumulado.tipo}! Decisão: ${comando}`);
+            return comando;
+
+        } else {
+            // Não tem como rebater, a única decisão é comprar.
+            console.log(`[UnoBot] Não pode rebater ${efeitoAcumulado.tipo}. Decisão: !comprar`);
+            return '!comprar';
+        }
+    }
+    // --- FIM DA LÓGICA DE PRIORIDADE ---
+
+    // A lógica de jogada normal só executa se não houver efeito acumulado.
+    const jogadasPossiveis = [];
     maoDoBot.forEach((carta, index) => {
         const podeJogar = (
-            carta.cor === 'preto' || // Curingas podem sempre ser jogados
+            carta.cor === 'preto' ||
             carta.cor === corAtual ||
             carta.valor === cartaAtual.valor
         );
+        
         if (podeJogar) {
-            // O comando é o índice da carta + 1 (para ser mais intuitivo para humanos)
-            jogadasPossiveis.push(`!jogar ${index + 1}`);
+            if (carta.cor === 'preto') {
+                const cores = ['vermelho', 'amarelo', 'verde', 'azul'];
+                const corAleatoria = cores[Math.floor(Math.random() * cores.length)];
+                jogadasPossiveis.push(`!jogar ${index + 1} ${corAleatoria}`);
+            } else {
+                jogadasPossiveis.push(`!jogar ${index + 1}`);
+            }
         }
     });
 
-    // Se tiver jogadas, escolhe uma aleatoriamente
     if (jogadasPossiveis.length > 0) {
         const jogadaAleatoria = jogadasPossiveis[Math.floor(Math.random() * jogadasPossiveis.length)];
         console.log(`[UnoBot] Decisão do bot: ${jogadaAleatoria}`);
         return jogadaAleatoria;
     }
 
-    // Se não tiver jogadas, o comando é comprar
     console.log('[UnoBot] Decisão do bot: !comprar');
     return '!comprar';
 }
 
-module.exports = { createBotPlayer, decideAction, BOT_ID };
+module.exports = { createBotPlayer, decideAction, BOT_ID, BOT_NAME };

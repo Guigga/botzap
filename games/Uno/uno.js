@@ -4,21 +4,11 @@ const sessionManager = require('../../sessions/sessionManager');
 const { gerarBaralhoUno } = require('./baralhoUno');
 const botPlayer = require('./botPlayer'); // Importamos o bot
 
-// --- FUNÇÃO DE FORMATAÇÃO (já tínhamos) ---
-function formatarMaoParaMensagem(mao, gameState, cartasCompradas = []) {
-    const corEmoji = { 'vermelho': '🟥', 'amarelo': '🟨', 'verde': '🟩', 'azul': '🟦', 'preto': '🎨' };
-    let textoFinal = '';
+// games/Uno/uno.js
 
-    // VERIFICAÇÃO ADICIONADA: Só mostra a última carta se ela existir.
-    if (gameState.cartaAtual) {
-        const sentidoEmoji = gameState.sentido === 1 ? '➡️' : '⬅️';
-        textoFinal += `Última carta jogada: *${corEmoji[gameState.corAtual]} ${gameState.cartaAtual.valor}* ${sentidoEmoji}\n\n`;
-    } else {
-        // Mensagem especial para a mão inicial, antes do jogo começar de fato.
-        textoFinal += 'Estas são suas cartas iniciais!\n\n';
-    }
-    
-    textoFinal += '*Sua mão:*\n';
+function formatarMaoJogador(mao, gameState, cartasCompradas = []) {
+    const corEmoji = { 'vermelho': '🟥', 'amarelo': '🟨', 'verde': '🟩', 'azul': '🟦', 'preto': '🎨' };
+    let textoFinal = '*Sua mão atual:*\n';
 
     const maoAntiga = mao.filter(c => !cartasCompradas.includes(c));
     if (maoAntiga.length > 0) {
@@ -37,6 +27,11 @@ function formatarMaoParaMensagem(mao, gameState, cartasCompradas = []) {
     }
 
     textoFinal += '\nPara jogar, use `!jogar <número da carta>`.';
+    
+    if (gameState && gameState.comprouNestaRodada) {
+        textoFinal += '\nSe não puder jogar, use `!passar`.';
+    }
+
     return textoFinal;
 }
 
@@ -51,7 +46,10 @@ function prepararJogo(session) {
         jogadorDaVezIndex: 0,
         sentido: 1,
         corAtual: null,
-        efeitoPendente: null,
+        // Propriedade nova para controlar o acúmulo de +2 e +4
+        efeitoAcumulado: { tipo: null, quantidade: 0 },
+        // Propriedade nova para a regra de compra voluntária
+        comprouNestaRodada: false,
         disseUno: new Set()
     };
     console.log(`[UNO] Jogo preparado para ${session.groupId}`);
@@ -60,24 +58,16 @@ function prepararJogo(session) {
 // --- FUNÇÃO DE INÍCIO (já tínhamos) ---
 async function iniciarPartida(session, client) {
     const { gameState } = session;
+
+    // 1. Distribui 7 cartas para cada jogador
     for (let i = 0; i < 7; i++) {
         for (const jogador of gameState.jogadores) {
-            // Garante que o baralho não fique vazio durante a distribuição
             if (gameState.baralho.length === 0) break;
             jogador.mao.push(gameState.baralho.pop());
         }
     }
 
-    // CORREÇÃO 1: Passar o 'gameState' ao formatar a mão inicial
-    for (const jogador of gameState.jogadores) {
-        if (jogador.id.includes('@cpu.bot')) {
-            console.log(`[UNO] Mão do Bot ${jogador.name}:`, jogador.mao.map(c => `${c.cor} ${c.valor}`).join(', '));
-        } else {
-            // A função agora é chamada com os dois argumentos necessários
-            await client.sendMessage(jogador.id, formatarMaoParaMensagem(jogador.mao, gameState));
-        }
-    }
-
+    // 2. Vira a primeira carta ANTES de enviar as mãos
     let primeiraCarta = gameState.baralho.pop();
     while (primeiraCarta.valor === '+4') {
         gameState.baralho.push(primeiraCarta);
@@ -91,7 +81,16 @@ async function iniciarPartida(session, client) {
     gameState.cartaAtual = primeiraCarta;
     gameState.corAtual = primeiraCarta.cor;
 
-    // CORREÇÃO 2: Formatar a primeira carta diretamente, sem chamar a função da mão
+    // 3. Envia a mão inicial para cada jogador, agora com o gameState completo
+    for (const jogador of gameState.jogadores) {
+        if (jogador.id.includes('@cpu.bot')) {
+            console.log(`[UNO] Mão do Bot ${jogador.name}:`, jogador.mao.map(c => `${c.cor} ${c.valor}`).join(', '));
+        } else {
+            await client.sendMessage(jogador.id, formatarMaoJogador(jogador.mao, gameState));
+        }
+    }
+
+    // 4. Monta o anúncio inicial
     const corEmoji = { 'vermelho': '🟥', 'amarelo': '🟨', 'verde': '🟩', 'azul': '🟦', 'preto': '🎨' };
     let anuncioInicial = `*O jogo de UNO começou!* 🃏\n\nA primeira carta na mesa é: *${corEmoji[gameState.corAtual]} ${gameState.cartaAtual.valor}*\n\n`;
 
@@ -108,10 +107,16 @@ async function iniciarPartida(session, client) {
             break;
         case '+2':
             anuncioInicial += `*${jogadorInicial.name}* compra 2 cartas e perde a vez!\n`;
-            jogadorInicial.mao.push(gameState.baralho.pop(), gameState.baralho.pop());
-            // Envia a mão atualizada para o jogador que comprou
+            const cartasCompradas = [];
+            for (let i = 0; i < 2; i++) {
+                if (gameState.baralho.length === 0) await reembaralharPilha(session, client);
+                const carta = gameState.baralho.pop();
+                jogadorInicial.mao.push(carta);
+                cartasCompradas.push(carta);
+            }
             if (!jogadorInicial.id.includes('@cpu.bot')) {
-                await client.sendMessage(jogadorInicial.id, formatarMaoParaMensagem(jogadorInicial.mao, gameState, [jogadorInicial.mao.slice(-2)[0], jogadorInicial.mao.slice(-1)[0]]));
+                // CORREÇÃO APLICADA AQUI: Usando o nome da função certa
+                await client.sendMessage(jogadorInicial.id, formatarMaoJogador(jogadorInicial.mao, gameState, cartasCompradas));
             }
             gameState.jogadorDaVezIndex = (gameState.jogadorDaVezIndex + gameState.sentido + gameState.jogadores.length) % gameState.jogadores.length;
             break;
@@ -132,6 +137,9 @@ async function iniciarPartida(session, client) {
     anuncioInicial += `É a vez de *${jogadorDaVez.name}* jogar.`;
     await client.sendMessage(session.groupId, anuncioInicial);
 
+    const dummyDealer = { name: "Dealer" };
+    await notificarVezDoJogador(session, client, jogadorDaVez, dummyDealer);
+
     if (jogadorDaVez.id.includes('@cpu.bot')) {
         await dispararAcaoBot(session, client);
     }
@@ -139,138 +147,156 @@ async function iniciarPartida(session, client) {
 
 // --- NOVAS FUNÇÕES ---
 
-/**
- * Processa a tentativa de um jogador de jogar uma carta.
- * @param {object} message - O objeto da mensagem.
- * @param {object} session - A sessão do jogo.
- * @param {object} client - O cliente do WhatsApp.
- */
 async function processarJogada(message, session, client) {
     const { gameState } = session;
     const playerId = message.author || message.from;
     const jogadorAtual = gameState.jogadores[gameState.jogadorDaVezIndex];
 
-    // --- Bloco de Validações (AGORA COMPLETO) ---
-    if (jogadorAtual.id !== playerId) {
-        // Ignora silenciosamente se não for um bot, para não poluir o chat
-        if (!playerId.includes('@cpu.bot')) {
-            return message.reply("Opa, não é a sua vez de jogar!");
-        }
-        return; // Sai silenciosamente se for um bot tentando jogar fora de hora
+    // Validações de turno e carta (aqui não muda)
+    if (!jogadorAtual || jogadorAtual.id !== playerId) {
+        if (!playerId.includes('@cpu.bot')) { return message.reply("Opa, não é a sua vez de jogar!"); }
+        return;
     }
-    if (session.status === 'aguardando_escolha_cor') {
-        return message.reply("Você precisa escolher uma cor antes de jogar! Use `!cor <nome da cor>`.");
-    }
-
-    const numeroCarta = parseInt(message.body.split(' ')[1]);
+    const commandArgs = message.body.trim().split(/\s+/);
+    const numeroCarta = parseInt(commandArgs[1]);
     if (isNaN(numeroCarta) || numeroCarta < 1 || numeroCarta > jogadorAtual.mao.length) {
-        if (!playerId.includes('@cpu.bot')) {
-            return message.reply(`Número de carta inválido. Escolha um número de 1 a ${jogadorAtual.mao.length}.`);
-        }
-        return; // Bot cometeu um erro, sai para evitar crash
+        if (!playerId.includes('@cpu.bot')) { return message.reply(`Número de carta inválido.`); }
+        return;
     }
     const indexCarta = numeroCarta - 1;
     const cartaJogada = jogadorAtual.mao[indexCarta];
 
-    const podeJogar = cartaJogada.cor === 'preto' || cartaJogada.cor === gameState.corAtual || cartaJogada.valor === gameState.cartaAtual.valor;
-    if (!podeJogar) {
-        if (!playerId.includes('@cpu.bot')) {
-            return message.reply(`Jogada inválida! Você só pode jogar uma carta da cor *${gameState.corAtual.toUpperCase()}*, com o valor *${gameState.cartaAtual.valor}* ou um *Curinga*.`);
+    // --- NOVA LÓGICA DE VALIDAÇÃO (COM REGRA DE ACÚMULO) ---
+    const { efeitoAcumulado } = gameState;
+    if (efeitoAcumulado.quantidade > 0) {
+        // Se há um efeito, o jogador SÓ pode responder com uma carta de mesmo valor
+        if (cartaJogada.valor !== efeitoAcumulado.tipo) {
+            return message.reply(`Você deve responder com uma carta *${efeitoAcumulado.tipo}* ou usar \`!comprar\`.`);
         }
-        return; // Bot cometeu um erro, sai para evitar crash
+    } else {
+        // Validação normal, se não houver efeito
+        const podeJogar = cartaJogada.cor === 'preto' || cartaJogada.cor === gameState.corAtual || cartaJogada.valor === gameState.cartaAtual.valor;
+        if (!podeJogar) {
+            if (!playerId.includes('@cpu.bot')) { return message.reply(`Jogada inválida!`); }
+            return;
+        }
+    }
+    
+    // Lógica de Coringa (aqui não muda)
+    if (cartaJogada.cor === 'preto') {
+        const corEscolhida = commandArgs[2]?.toLowerCase();
+        const coresValidas = ['vermelho', 'amarelo', 'verde', 'azul'];
+        if (!corEscolhida || !coresValidas.includes(corEscolhida)) {
+            return message.reply(`Essa é uma carta coringa! Use: \`!jogar ${numeroCarta} <cor>\``);
+        }
+        gameState.corAtual = corEscolhida;
+    } else {
+        gameState.corAtual = cartaJogada.cor;
     }
 
-    // --- Bloco de Execução (continua como antes) ---
-    jogadorAtual.mao.splice(indexCarta, 1); // Remove a carta da mão
+    // --- Execução da Jogada e Anúncio (aqui não muda) ---
+    jogadorAtual.mao.splice(indexCarta, 1);
     gameState.pilhaDescarte.push(cartaJogada);
     gameState.cartaAtual = cartaJogada;
-    gameState.corAtual = cartaJogada.cor;
-
+    
     const corEmoji = { 'vermelho': '🟥', 'amarelo': '🟨', 'verde': '🟩', 'azul': '🟦', 'preto': '🎨' };
-    await client.sendMessage(session.groupId, `*${jogadorAtual.name}* jogou: *${corEmoji[cartaJogada.cor]} ${cartaJogada.valor}*`);
+    let anuncioJogada = `*${jogadorAtual.name}* jogou: *${corEmoji[cartaJogada.cor]} ${cartaJogada.valor}*`;
+    if (cartaJogada.cor === 'preto') {
+        anuncioJogada += ` e escolheu a cor *${gameState.corAtual.toUpperCase()}*!`;
+    }
+    await client.sendMessage(session.groupId, anuncioJogada);
 
     if (!jogadorAtual.id.includes('@cpu.bot')) {
-        const msgMao = formatarMaoParaMensagem(jogadorAtual.mao, gameState);
-        await client.sendMessage(jogadorAtual.id, msgMao);
+        await client.sendMessage(jogadorAtual.id, formatarMaoJogador(jogadorAtual.mao, gameState));
     }
 
+    // Verificação de vitória e UNO
     if (jogadorAtual.mao.length === 0) {
         await client.sendMessage(session.groupId, `*FIM DE JOGO!* 🏆\n*${jogadorAtual.name}* venceu a partida!`);
         sessionManager.endSession(session.groupId);
         return;
     }
-
+    // Adiciona a verificação e o anúncio automático de UNO
     if (jogadorAtual.mao.length === 1 && !gameState.disseUno.has(playerId)) {
-        await client.sendMessage(session.groupId, `*${jogadorAtual.name}* tem apenas uma carta!`);
+        await client.sendMessage(session.groupId, `UNO! 🗣️\n*${jogadorAtual.name}* tem apenas uma carta!`);
+        gameState.disseUno.add(playerId);
     }
 
-    // ... (verificação de vitória e de "UNO!" continua a mesma) ...
 
-    // Lidar com efeitos de cartas de ação
-    if (cartaJogada.cor !== 'preto') {
-        let devePular = false;
-        switch(cartaJogada.valor) {
-            case 'pular':
-                devePular = true;
-                break;
-            case 'reverso':
-                gameState.sentido *= -1;
-                await client.sendMessage(session.groupId, `Sentido do jogo invertido!`);
-                break;
-            case '+2':
-                const proximoJogadorIndex = (gameState.jogadorDaVezIndex + gameState.sentido + gameState.jogadores.length) % gameState.jogadores.length;
-                const proximoJogador = gameState.jogadores[proximoJogadorIndex];
-                const cartasCompradas = [];
-                
-                for (let i = 0; i < 2; i++) {
-                    if (gameState.baralho.length === 0) await reembaralharPilha(session, client);
-                    const carta = gameState.baralho.pop();
-                    proximoJogador.mao.push(carta);
-                    cartasCompradas.push(carta);
-                }
-                
-                await client.sendMessage(session.groupId, `*${proximoJogador.name}* compra 2 cartas e perde a vez!`);
-                if (!proximoJogador.id.includes('@cpu.bot')) {
-                    const msgMao = formatarMaoParaMensagem(proximoJogador.mao, gameState, cartasCompradas);
-                    await client.sendMessage(proximoJogador.id, msgMao);
-                }
-                devePular = true;
-                break;
-        }
-        if (devePular) {
-            gameState.jogadorDaVezIndex = (gameState.jogadorDaVezIndex + gameState.sentido + gameState.jogadores.length) % gameState.jogadores.length;
-        }
-        await avancarTurno(session, client);
-    } else {
-        // Curinga ou +4: aguardar escolha da cor
-        session.status = 'aguardando_escolha_cor';
-        if (jogadorAtual.id.includes('@cpu.bot')) {
-            // Se for o bot, ele escolhe a cor aleatoriamente e o jogo continua
-            const cores = ['vermelho', 'amarelo', 'verde', 'azul'];
-            gameState.corAtual = cores[Math.floor(Math.random() * cores.length)];
-            await client.sendMessage(session.groupId, `*${jogadorAtual.name}* (BOT) escolheu a cor *${gameState.corAtual.toUpperCase()}*!`);
-            session.status = 'em_jogo'; // Bot já escolheu, volta ao normal
-            await avancarTurno(session, client);
-        } else {
-            // Se for humano, espera o comando !cor
-            await client.sendMessage(session.groupId, `*${jogadorAtual.name}*, escolha a nova cor com \`!cor <nome da cor>\`.`);
+    // --- APLICAÇÃO DE EFEITOS (COM REGRA DE REVERSO PARA 2 JOGADORES) ---
+    if (cartaJogada.valor === 'reverso') {
+        // Apenas inverte o sentido se houver mais de 2 jogadores
+        if (gameState.jogadores.length > 2) {
+            gameState.sentido *= -1;
+            await client.sendMessage(session.groupId, 'O sentido do jogo foi invertido!');
         }
     }
+    
+    // Se a carta for +2 ou +4, ACUMULA o efeito
+    if (cartaJogada.valor === '+2' || cartaJogada.valor === '+4') {
+        const eraAcumulado = gameState.efeitoAcumulado.quantidade > 0;
+        gameState.efeitoAcumulado.tipo = cartaJogada.valor;
+        gameState.efeitoAcumulado.quantidade += (cartaJogada.valor === '+2' ? 2 : 4);
+        if (eraAcumulado) {
+            await client.sendMessage(session.groupId, `💥 Efeito acumulado! Próximo jogador deve comprar *${gameState.efeitoAcumulado.quantidade}* ou responder com outra carta *${cartaJogada.valor}*!`);
+        }
+    }
+
+    // Define se a próxima jogada deve pular um turno.
+    // Isso acontece se a carta for 'pular' OU se for 'reverso' com apenas 2 jogadores.
+    const devePular = cartaJogada.valor === 'pular' || (cartaJogada.valor === 'reverso' && gameState.jogadores.length === 2);
+    
+    // Chama a função de avançar o turno, informando se deve pular ou não.
+    await avancarTurno(session, client, devePular);
 }
 
-/**
- * Avança para o próximo jogador e anuncia sua vez.
- * @param {object} session - A sessão do jogo.
- * @param {object} client - O cliente do WhatsApp.
- */
-async function avancarTurno(session, client) {
+async function notificarVezDoJogador(session, client, jogadorDaVez, jogadorAnterior) {
+    if (jogadorDaVez.id.includes('@cpu.bot')) return;
+
     const { gameState } = session;
-    gameState.jogadorDaVezIndex = (gameState.jogadorDaVezIndex + gameState.sentido + gameState.jogadores.length) % gameState.jogadores.length;
+    const corEmoji = { 'vermelho': '🟥', 'amarelo': '🟨', 'verde': '🟩', 'azul': '🟦', 'preto': '🎨' };
+    const sentidoEmoji = gameState.sentido === 1 ? '➡️' : '⬅️';
+    
+    let notificacao = `Na mesa: *${corEmoji[gameState.corAtual]} ${gameState.cartaAtual.valor}* (${jogadorAnterior.name}) ${sentidoEmoji}\n` +
+                      `*Sua vez!*`;
+
+    // Avisa sobre um efeito acumulado
+    if (gameState.efeitoAcumulado.quantidade > 0) {
+        notificacao += `\n\n*ATENÇÃO!* Você deve jogar uma carta *${gameState.efeitoAcumulado.tipo}* ou usar \`!comprar\` para pegar *${gameState.efeitoAcumulado.quantidade}* cartas.`;
+    }
+    
+    let commandLine = `\`!jogar <número>\` | \`!comprar\``;
+    // Mostra a opção de passar apenas se o jogador já comprou
+    if (gameState.comprouNestaRodada) {
+        commandLine += ` | \`!passar\``;
+    }
+    notificacao += `\n---\n${commandLine}`;
+    
+    await client.sendMessage(jogadorDaVez.id, notificacao);
+}
+
+async function avancarTurno(session, client, pularProximo = false) {
+    const { gameState } = session;
+    const jogadorAnterior = gameState.jogadores[gameState.jogadorDaVezIndex];
+
+    gameState.comprouNestaRodada = false;
+
+    let proximoIndex = (gameState.jogadorDaVezIndex + gameState.sentido + gameState.jogadores.length) % gameState.jogadores.length;
+
+    // Se a jogada anterior exige um pulo, avança mais uma vez
+    if (pularProximo) {
+        const jogadorPulado = gameState.jogadores[proximoIndex];
+        console.log(`[UNO] Ação pulou o turno de ${jogadorPulado.name}`);
+        proximoIndex = (proximoIndex + gameState.sentido + gameState.jogadores.length) % gameState.jogadores.length;
+    }
+
+    gameState.jogadorDaVezIndex = proximoIndex;
     
     const jogadorDaVez = gameState.jogadores[gameState.jogadorDaVezIndex];
+    
     await client.sendMessage(session.groupId, `É a vez de *${jogadorDaVez.name}*.`);
+    await notificarVezDoJogador(session, client, jogadorDaVez, jogadorAnterior);
 
-    // Se o próximo jogador for um bot, dispara sua ação
     if (jogadorDaVez.id.includes('@cpu.bot')) {
         await dispararAcaoBot(session, client);
     }
@@ -317,12 +343,6 @@ async function reembaralharPilha(session, client) {
     }
 }
 
-/**
- * Processa a escolha de cor do jogador após jogar um Curinga.
- * @param {object} message - O objeto da mensagem.
- * @param {object} session - A sessão do jogo.
- * @param {object} client - O cliente do WhatsApp.
- */
 async function processarEscolhaDeCor(message, session, client) {
     const { gameState } = session;
     const playerId = message.author || message.from;
@@ -333,7 +353,6 @@ async function processarEscolhaDeCor(message, session, client) {
 
     const corEscolhida = message.body.split(' ')[1]?.toLowerCase();
     const coresValidas = ['vermelho', 'azul', 'verde', 'amarelo'];
-
     if (!coresValidas.includes(corEscolhida)) {
         return message.reply(`Cor inválida! Escolha entre: ${coresValidas.join(', ')}.`);
     }
@@ -342,57 +361,114 @@ async function processarEscolhaDeCor(message, session, client) {
     session.status = 'em_jogo';
 
     const corEmoji = { 'vermelho': '🟥', 'amarelo': '🟨', 'verde': '🟩', 'azul': '🟦' };
-    await client.sendMessage(session.groupId, `*${jogadorAtual.name}* escolheu a cor *${corEmoji[corEscolhida]} ${corEscolhida.toUpperCase()}*!`);
+    const msgGrupo = `*${jogadorAtual.name}* escolheu a cor *${corEmoji[corEscolhida]} ${corEscolhida.toUpperCase()}*!`;
+    await client.sendMessage(session.groupId, msgGrupo);
+
+    // <<< MENSAGEM DE FEEDBACK ADICIONADA >>>
+    // Envia a confirmação também no privado do jogador.
+    if (!jogadorAtual.id.includes('@cpu.bot')) {
+        await client.sendMessage(jogadorAtual.id, `✅ Cor definida para *${corEscolhida.toUpperCase()}*!`);
+    }
+
+    gameState.disseUno.delete(playerId);
 
     const ultimaCarta = gameState.cartaAtual;
-    if (ultimaCarta.valor === '+4') {
-        const proximoJogadorIndex = (gameState.jogadorDaVezIndex + gameState.sentido + gameState.jogadores.length) % gameState.jogadores.length;
-        const proximoJogador = gameState.jogadores[proximoJogadorIndex];
-        const cartasCompradas = [];
-
-        await client.sendMessage(session.groupId, `*${proximoJogador.name}* compra 4 cartas e perde a vez!`);
-        for (let i = 0; i < 4; i++) {
-            if (gameState.baralho.length === 0) await reembaralharPilha(session, client);
-            const carta = gameState.baralho.pop();
-            proximoJogador.mao.push(carta);
-            cartasCompradas.push(carta);
-        }
-        
-        if (!proximoJogador.id.includes('@cpu.bot')) {
-            const msgMao = formatarMaoParaMensagem(proximoJogador.mao, gameState, cartasCompradas);
-            await client.sendMessage(proximoJogador.id, msgMao);
-        }
-        gameState.jogadorDaVezIndex = proximoJogadorIndex;
-    }
-    await avancarTurno(session, client);
+    const devePular = cartaJogada.valor === 'pular';
+    await avancarTurno(session, client, devePular);
 }
 
-/**
- * Processa a ação de um jogador comprar uma carta do baralho.
- * @param {object} message - O objeto da mensagem.
- * @param {object} session - A sessão do jogo.
- * @param {object} client - O cliente do WhatsApp.
- */
 async function processarCompra(message, session, client) {
     const { gameState } = session;
     const playerId = message.author || message.from;
     const jogadorAtual = gameState.jogadores[gameState.jogadorDaVezIndex];
 
-    if (jogadorAtual.id !== playerId) return message.reply("Calma, não é sua vez de comprar!");
+    if (jogadorAtual.id !== playerId) return;
 
-    if (gameState.baralho.length === 0) {
-        await reembaralharPilha(session, client);
+    // Se existe um efeito acumulado, a compra é FORÇADA
+    if (gameState.efeitoAcumulado.quantidade > 0) {
+        const { quantidade, tipo } = gameState.efeitoAcumulado;
+        const cartasCompradas = [];
+
+        await client.sendMessage(session.groupId, `*${jogadorAtual.name}* não tinha uma carta *${tipo}* e comprou *${quantidade}* cartas!`);
+        for (let i = 0; i < quantidade; i++) {
+            if (gameState.baralho.length === 0) await reembaralharPilha(session, client);
+            const carta = gameState.baralho.pop();
+            jogadorAtual.mao.push(carta);
+            cartasCompradas.push(carta);
+        }
+        
+        if (!jogadorAtual.id.includes('@cpu.bot')) {
+            await client.sendMessage(jogadorAtual.id, formatarMaoJogador(jogadorAtual.mao, cartasCompradas));
+        }
+
+        // Zera o efeito e passa a vez (jogador que compra perde a vez)
+        gameState.efeitoAcumulado = { tipo: null, quantidade: 0 };
+        await avancarTurno(session, client);
+
+    } else { // Se não, a compra é VOLUNTÁRIA
+        if (gameState.comprouNestaRodada) {
+            return message.reply("Você já comprou uma carta nesta rodada.");
+        }
+        if (gameState.baralho.length === 0) await reembaralharPilha(session, client);
+        
+        const cartaComprada = gameState.baralho.pop();
+        jogadorAtual.mao.push(cartaComprada);
+        gameState.comprouNestaRodada = true;
+        gameState.disseUno.delete(playerId);
+
+        await client.sendMessage(session.groupId, `*${jogadorAtual.name}* comprou uma carta.`);
+
+        if (jogadorAtual.id.includes('@cpu.bot')) {
+            // O bot verifica se a carta comprada pode ser jogada
+            const podeJogar = cartaComprada.cor === 'preto' || cartaComprada.cor === gameState.corAtual || cartaComprada.valor === gameState.cartaAtual.valor;
+            
+            await new Promise(resolve => setTimeout(resolve, 1500)); // Pequena pausa para o bot "pensar"
+
+            if (podeJogar) {
+                const numeroDaCarta = jogadorAtual.mao.length; // A carta comprada é sempre a última
+                
+                let comandoBot = `!jogar ${numeroDaCarta}`;
+                // Se a carta for coringa, o bot escolhe uma cor
+                if (cartaComprada.cor === 'preto') {
+                    const cores = ['vermelho', 'amarelo', 'verde', 'azul'];
+                    const corAleatoria = cores[Math.floor(Math.random() * cores.length)];
+                    comandoBot += ` ${corAleatoria}`;
+                }
+                
+                const fakeMessageJogar = { author: playerId, body: comandoBot, reply: () => {} };
+                await processarJogada(fakeMessageJogar, session, client);
+
+            } else {
+                // Se não pode jogar a carta, o bot agora sabe que deve passar a vez
+                console.log(`[UnoBot] Carta comprada (${cartaComprada.cor} ${cartaComprada.valor}) não é jogável. O bot vai passar a vez.`);
+                const fakeMessagePassar = { author: playerId, body: '!passar', reply: () => {} };
+                await processarPasse(fakeMessagePassar, session, client);
+            }
+        } else {
+            // A lógica para o jogador humano continua a mesma (apenas envia a mão atualizada)
+            await client.sendMessage(jogadorAtual.id, formatarMaoJogador(jogadorAtual.mao, gameState, [cartaComprada]));
+        }
+        // O turno NÃO avança, o jogador pode tentar jogar a carta que comprou ou outra.
     }
-    
-    const cartaComprada = gameState.baralho.pop();
-    jogadorAtual.mao.push(cartaComprada);
+}
 
-    await client.sendMessage(session.groupId, `*${jogadorAtual.name}* comprou uma carta.`);
+async function processarPasse(message, session, client) {
+    const { gameState } = session;
+    const playerId = message.author || message.from;
+    const jogadorAtual = gameState.jogadores[gameState.jogadorDaVezIndex];
 
-    if (!jogadorAtual.id.includes('@cpu.bot')) {
-        const msgMao = formatarMaoParaMensagem(jogadorAtual.mao, gameState, [cartaComprada]);
-        await client.sendMessage(jogadorAtual.id, msgMao);
+    // Valida se é o jogador correto
+    if (!jogadorAtual || jogadorAtual.id !== playerId) {
+        return message.reply("Opa, não é a sua vez de jogar!");
     }
+
+    // Valida se o jogador comprou uma carta nesta rodada para poder passar
+    if (!gameState.comprouNestaRodada) {
+        return message.reply("Você só pode passar a vez depois de ter comprado uma carta.");
+    }
+
+    // Se a validação passar, anuncia e avança o turno
+    await client.sendMessage(session.groupId, `*${jogadorAtual.name}* passou a vez.`);
     await avancarTurno(session, client);
 }
 
@@ -401,5 +477,6 @@ module.exports = {
     iniciarPartida, 
     processarJogada,
     processarEscolhaDeCor,
-    processarCompra
+    processarCompra,
+    processarPasse
 };

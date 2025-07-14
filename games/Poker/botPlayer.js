@@ -82,7 +82,7 @@ function decideAction(session) {
     const isFacingBet = gameState.apostaAtual > apostaRodadaBot;
     const amountToCall = gameState.apostaAtual - apostaRodadaBot;
 
-    let command = '!desistir';
+    let command = '!correr';
     let amount = 0;
 
     // --- NOVA LÓGICA DE DECISÃO ---
@@ -94,7 +94,7 @@ function decideAction(session) {
         if (handInfo.strength === 'MUITO_FORTE' || (handInfo.strength === 'FORTE' && Math.random() < odds)) {
             command = '!allin'; // O handler de allin cuidará do resto.
         } else {
-            command = '!desistir';
+            command = '!correr';
         }
     } else {
         // Se PODE cobrir a aposta, usa a lógica antiga.
@@ -103,13 +103,13 @@ function decideAction(session) {
         } else if (handInfo.strength === 'FORTE') {
             command = isFacingBet ? '!pagar' : '!apostar';
         } else if (handInfo.strength === 'MEDIA') {
-            command = isFacingBet ? '!desistir' : '!mesa';
+            command = isFacingBet ? '!correr' : '!mesa';
             // Lógica de blefe simples
             if (!isFacingBet && perfil !== 'CONSERVADOR' && Math.random() < 0.15) {
                 command = '!apostar';
             }
         } else { // FRACA ou MUITO_FRACA
-            command = isFacingBet ? '!desistir' : '!mesa';
+            command = isFacingBet ? '!correr' : '!mesa';
         }
     }
 
@@ -127,7 +127,7 @@ function decideAction(session) {
     
     // 3. Validação final para não dar !mesa enfrentando aposta
     if (command === '!mesa' && isFacingBet) {
-        command = '!desistir';
+        command = '!correr';
     }
 
     const finalCommand = amount > 0 ? `${command} ${amount}` : command;

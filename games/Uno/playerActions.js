@@ -19,7 +19,10 @@ async function handleGameCommand(message, session, client) {
             await uno.processarCompra(message, session, client);
             break;
         
-        // Futuramente, podemos adicionar !uno aqui
+        case '!passa':
+        case '!passar':
+            await uno.processarPasse(message, session, client);
+            break;
     }
 }
 
