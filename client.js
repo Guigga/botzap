@@ -1,12 +1,14 @@
 // client.js
-const dataPath = path.join(__dirname, '.wwebjs_auth');
+
+// --- BLOCO DE IMPORTAÇÕES ---
+// Todas as suas importações devem vir primeiro.
+const { Client, LocalAuth } = require('whatsapp-web.js');
 const path = require('path');
 
-console.log('Caminho da sessão configurado para:', dataPath);
-
+// --- BLOCO DE CONFIGURAÇÃO ---
+// Agora que 'path' foi importado, podemos usá-lo.
 const client = new Client({
     authStrategy: new LocalAuth({
-        // 2. Especifique o caminho exato para a pasta de autenticação
         dataPath: path.join(__dirname, '.wwebjs_auth')
     }),
     puppeteer: {
@@ -24,6 +26,7 @@ const client = new Client({
     }
 });
 
+// --- BLOCO DE INICIALIZAÇÃO E EXPORTAÇÃO ---
 client.initialize();
 
 module.exports = { client };
