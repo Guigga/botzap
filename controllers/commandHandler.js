@@ -41,7 +41,8 @@ async function handleCommand(message, client) {
                                   `• Poker\n` +
                                   `• Truco\n` +
                                   `• Forca\n` +
-                                  `• Velha\n\n` +
+                                  `• Velha\n` +
+                                  `• Uno\n\n` +
                                   `---\n\n` +
                                   `*Outros comandos:*\n` +
                                   `• \`!figurinha\` - Responda a uma imagem para criar um sticker.\n` +
@@ -124,7 +125,7 @@ async function handleCommand(message, client) {
         
         if (!session) {
             if (command.startsWith('!')) {
-                 await message.reply('Nenhum jogo em andamento. Para começar, digite:\n`!jogo <nome do jogo>\n Para mais informações digite:`!botzap` `');
+                 await message.reply('Digite:`!botzap` para mais informações');
             }
             return;
         }
