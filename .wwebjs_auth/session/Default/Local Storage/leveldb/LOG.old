@@ -1,3 +1,6 @@
-2025/07/14-14:01:13.195 7b4f Reusing MANIFEST /home/guigga/botzap/.wwebjs_auth/session/Default/Local Storage/leveldb/MANIFEST-000001
-2025/07/14-14:01:13.196 7b4f Recovering log #3
-2025/07/14-14:01:13.197 7b4f Reusing old log /home/guigga/botzap/.wwebjs_auth/session/Default/Local Storage/leveldb/000003.log 
+2025/07/14-17:47:12.214 b514 Reusing MANIFEST /home/guigga/botzap/.wwebjs_auth/session/Default/Local Storage/leveldb/MANIFEST-000001
+2025/07/14-17:47:12.215 b514 Recovering log #8
+2025/07/14-17:47:12.216 b514 Reusing old log /home/guigga/botzap/.wwebjs_auth/session/Default/Local Storage/leveldb/000008.log 
+2025/07/14-17:48:13.749 b552 Level-0 table #11: started
+2025/07/14-17:48:13.756 b552 Level-0 table #11: 13803 bytes OK
+2025/07/14-17:48:13.766 b552 Delete type=0 #8

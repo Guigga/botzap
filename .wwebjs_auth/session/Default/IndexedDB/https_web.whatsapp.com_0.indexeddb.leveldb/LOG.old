@@ -1,59 +1,8 @@
-2025/07/14-14:01:14.952 7b4f Reusing MANIFEST /home/guigga/botzap/.wwebjs_auth/session/Default/IndexedDB/https_web.whatsapp.com_0.indexeddb.leveldb/MANIFEST-000001
-2025/07/14-14:01:14.952 7b4f Recovering log #51
-2025/07/14-14:01:15.135 7b4f Reusing old log /home/guigga/botzap/.wwebjs_auth/session/Default/IndexedDB/https_web.whatsapp.com_0.indexeddb.leveldb/000051.log 
-2025/07/14-14:01:16.909 7b4f Level-0 table #57: started
-2025/07/14-14:01:16.961 7b4f Level-0 table #57: 1180520 bytes OK
-2025/07/14-14:01:16.972 7b4f Delete type=0 #51
-2025/07/14-14:01:17.844 7b86 Level-0 table #59: started
-2025/07/14-14:01:17.849 7b86 Level-0 table #59: 10786 bytes OK
-2025/07/14-14:01:17.855 7b86 Delete type=0 #56
-2025/07/14-14:01:17.855 7b86 Manual compaction at level-0 from '\x00\x17\x00\x00\x00' @ 72057594037927935 : 1 .. '\x00\x18\x00\x00\x00' @ 0 : 0; will stop at '\x00\x19\x00\x00\x05' @ 263470 : 1
-2025/07/14-14:01:17.855 7b86 Compacting 1@0 + 1@1 files
-2025/07/14-14:01:17.889 7b86 Generated table #60@0: 23421 keys, 601793 bytes
-2025/07/14-14:01:17.889 7b86 Compacted 1@0 + 1@1 files => 601793 bytes
-2025/07/14-14:01:17.892 7b86 compacted to: files[ 0 1 2 0 0 0 0 ]
-2025/07/14-14:01:17.892 7b86 Delete type=2 #59
-2025/07/14-14:01:17.893 7b86 Manual compaction at level-0 from '\x00\x19\x00\x00\x05' @ 263470 : 1 .. '\x00\x18\x00\x00\x00' @ 0 : 0; will stop at (end)
-2025/07/14-14:01:17.900 7b59 Level-0 table #62: started
-2025/07/14-14:01:17.904 7b59 Level-0 table #62: 602 bytes OK
-2025/07/14-14:01:17.908 7b59 Delete type=2 #57
-2025/07/14-14:01:17.908 7b59 Delete type=0 #58
-2025/07/14-14:01:17.909 7b59 Manual compaction at level-0 from '\x00\x18\x00\x00\x00' @ 72057594037927935 : 1 .. '\x00\x19\x00\x00\x00' @ 0 : 0; will stop at '\x00\x18\x00\x00\x05' @ 263511 : 0
-2025/07/14-14:01:17.909 7b59 Compacting 1@0 + 1@1 files
-2025/07/14-14:01:17.940 7b59 Generated table #63@0: 23427 keys, 602099 bytes
-2025/07/14-14:01:17.940 7b59 Compacted 1@0 + 1@1 files => 602099 bytes
-2025/07/14-14:01:17.944 7b59 compacted to: files[ 0 1 2 0 0 0 0 ]
-2025/07/14-14:01:17.944 7b59 Delete type=2 #62
-2025/07/14-14:01:17.944 7b59 Manual compaction at level-0 from '\x00\x18\x00\x00\x05' @ 263511 : 0 .. '\x00\x19\x00\x00\x00' @ 0 : 0; will stop at (end)
-2025/07/14-14:01:17.945 7b59 Level-0 table #65: started
-2025/07/14-14:01:17.948 7b59 Level-0 table #65: 249 bytes OK
-2025/07/14-14:01:17.952 7b59 Delete type=0 #61
-2025/07/14-14:01:17.952 7b59 Delete type=2 #60
-2025/07/14-14:01:17.953 7b59 Manual compaction at level-0 from '\x00\x19\x00\x00\x00' @ 72057594037927935 : 1 .. '\x00\x1a\x00\x00\x00' @ 0 : 0; will stop at '\x00\x19\x00\x00\x05' @ 263517 : 0
-2025/07/14-14:01:17.953 7b59 Compacting 1@0 + 1@1 files
-2025/07/14-14:01:17.983 7b59 Generated table #66@0: 23425 keys, 601669 bytes
-2025/07/14-14:01:17.983 7b59 Compacted 1@0 + 1@1 files => 601669 bytes
-2025/07/14-14:01:17.986 7b59 compacted to: files[ 0 1 2 0 0 0 0 ]
-2025/07/14-14:01:17.987 7b59 Delete type=2 #65
-2025/07/14-14:01:17.987 7b59 Manual compaction at level-0 from '\x00\x19\x00\x00\x05' @ 263517 : 0 .. '\x00\x1a\x00\x00\x00' @ 0 : 0; will stop at (end)
-2025/07/14-14:01:19.738 7b7f Compacting 1@1 + 2@2 files
-2025/07/14-14:01:19.847 7b7f Generated table #67@1: 41232 keys, 2211087 bytes
-2025/07/14-14:01:19.859 7b7f Generated table #68@1: 10563 keys, 203458 bytes
-2025/07/14-14:01:19.859 7b7f Compacted 1@1 + 2@2 files => 2414545 bytes
-2025/07/14-14:01:19.862 7b7f compacted to: files[ 0 0 2 0 0 0 0 ]
-2025/07/14-14:01:19.862 7b7f Delete type=2 #54
-2025/07/14-14:01:19.862 7b7f Delete type=2 #66
-2025/07/14-14:01:19.862 7b7f Delete type=2 #53
-2025/07/14-14:01:19.862 7b7f Delete type=2 #63
-2025/07/14-14:01:23.032 7b86 Level-0 table #70: started
-2025/07/14-14:01:23.037 7b86 Level-0 table #70: 110167 bytes OK
-2025/07/14-14:01:23.040 7b86 Delete type=0 #64
-2025/07/14-14:01:23.040 7b86 Manual compaction at level-0 from '\x00\x1c\x00\x00\x00' @ 72057594037927935 : 1 .. '\x00\x1d\x00\x00\x00' @ 0 : 0; will stop at (end)
-2025/07/14-14:01:23.679 7b8d Compacting 1@1 + 2@2 files
-2025/07/14-14:01:23.761 7b8d Generated table #71@1: 40499 keys, 2210054 bytes
-2025/07/14-14:01:23.777 7b8d Generated table #72@1: 12638 keys, 245399 bytes
-2025/07/14-14:01:23.777 7b8d Compacted 1@1 + 2@2 files => 2455453 bytes
-2025/07/14-14:01:23.781 7b8d compacted to: files[ 0 0 2 0 0 0 0 ]
-2025/07/14-14:01:23.781 7b8d Delete type=2 #67
-2025/07/14-14:01:23.781 7b8d Delete type=2 #68
-2025/07/14-14:01:23.781 7b8d Delete type=2 #70
+2025/07/14-17:47:13.649 b513 Reusing MANIFEST /home/guigga/botzap/.wwebjs_auth/session/Default/IndexedDB/https_web.whatsapp.com_0.indexeddb.leveldb/MANIFEST-000001
+2025/07/14-17:47:13.649 b513 Recovering log #175
+2025/07/14-17:47:13.749 b513 Reusing old log /home/guigga/botzap/.wwebjs_auth/session/Default/IndexedDB/https_web.whatsapp.com_0.indexeddb.leveldb/000175.log 
+2025/07/14-17:47:13.749 b513 Delete type=2 #173
+2025/07/14-17:47:13.749 b513 Delete type=2 #176
+2025/07/14-17:47:13.749 b513 Delete type=2 #172
+2025/07/14-17:47:13.749 b513 Delete type=2 #174
+2025/07/14-17:47:16.258 b553 Manual compaction at level-0 from '\x001\x00\x00\x00' @ 72057594037927935 : 1 .. '\x002\x00\x00\x00' @ 0 : 0; will stop at (end)

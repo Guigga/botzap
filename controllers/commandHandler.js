@@ -9,8 +9,9 @@ const trucoActions = require('../games/Truco/playerActions');
 const forcaActions = require('../games/Forca/playerActions');
 const velhaActions = require('../games/Velha/playerActions');
 const unoActions = require('../games/Uno/playerActions');
+const xadrezActions = require('../games/Xadrez/playerActions');
 const handleMusica = require('./musicaHandler');
-const JOGOS_VALIDOS = ['poker', 'truco', 'forca', 'velha', 'uno'];
+const JOGOS_VALIDOS = ['poker', 'truco', 'forca', 'velha', 'uno', 'xadrez'];
 
 async function handleCommand(message, client) {
     try {
@@ -42,7 +43,8 @@ async function handleCommand(message, client) {
                                   `• Truco\n` +
                                   `• Forca\n` +
                                   `• Velha\n` +
-                                  `• Uno\n\n` +
+                                  `• Uno\n` +
+                                  `• Xadrez\n\n` +
                                   `---\n\n` +
                                   `*Outros comandos:*\n` +
                                   `• \`!figurinha\` - Responda a uma imagem para criar um sticker.\n` +
@@ -163,7 +165,10 @@ async function handleCommand(message, client) {
                     break;
                 case 'uno':
                     await unoActions.handleGameCommand(message, session, client);
-                    break;    
+                    break;
+                case 'xadrez':
+                    await xadrezActions.handleGameCommand(message, session, client);
+                    break;
             }
             return;
         }
