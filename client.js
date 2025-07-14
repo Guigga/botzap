@@ -1,5 +1,6 @@
-const { Client, LocalAuth } = require('whatsapp-web.js');
-const path = require('path'); // 1. Importe o módulo 'path'
+// client.js
+const dataPath = path.join(__dirname, '.wwebjs_auth');
+console.log('Caminho da sessão configurado para:', dataPath); // Adicione esta linha
 
 const client = new Client({
     authStrategy: new LocalAuth({
