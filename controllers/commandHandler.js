@@ -42,7 +42,7 @@ async function handleCommand(message, client) {
                                   `• Truco\n` +
                                   `• Forca\n` +
                                   `• Velha\n` +
-                                  `• Uno (Em testes)\n\n` +
+                                  `• Uno\n\n` +
                                   `---\n\n` +
                                   `*Outros comandos:*\n` +
                                   `• \`!figurinha\` - Responda a uma imagem para criar um sticker.\n` +

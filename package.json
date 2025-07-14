@@ -13,9 +13,13 @@
     "@open-wa/wa-automate": "^4.76.0",
     "axios": "^1.10.0",
     "canvas": "^3.1.2",
+    "chess-engine": "^0.0.0",
+    "chess-image-generator": "^1.0.9",
+    "chess.js": "^1.4.0",
     "play-dl": "^1.9.7",
     "poker-evaluator": "^2.1.0",
     "qrcode-terminal": "^0.12.0",
+    "uci": "^0.3.4",
     "whatsapp-web.js": "^1.31.0",
     "ytdl-core": "^4.11.5",
     "ytsr": "^3.8.4"
