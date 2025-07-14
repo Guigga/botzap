@@ -1,6 +1,8 @@
 // client.js
 const dataPath = path.join(__dirname, '.wwebjs_auth');
-console.log('Caminho da sessão configurado para:', dataPath); // Adicione esta linha
+const path = require('path');
+
+console.log('Caminho da sessão configurado para:', dataPath);
 
 const client = new Client({
     authStrategy: new LocalAuth({
