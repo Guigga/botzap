@@ -1,7 +1,11 @@
 const { Client, LocalAuth } = require('whatsapp-web.js');
+const path = require('path'); // 1. Importe o módulo 'path'
 
 const client = new Client({
-    authStrategy: new LocalAuth(),
+    authStrategy: new LocalAuth({
+        // 2. Especifique o caminho exato para a pasta de autenticação
+        dataPath: path.join(__dirname, '.wwebjs_auth')
+    }),
     puppeteer: {
         headless: true,
         args: [
