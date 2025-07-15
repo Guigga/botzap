@@ -14,7 +14,6 @@
     "axios": "^1.10.0",
     "canvas": "^3.1.2",
     "chess-engine": "^0.0.0",
-    "chess-image-generator": "^1.0.9",
     "chess.js": "^1.4.0",
     "jimp": "^0.16.1",
     "play-dl": "^1.9.7",

@@ -1,6 +1,2 @@
-2025/07/14-17:47:12.214 b514 Reusing MANIFEST /home/guigga/botzap/.wwebjs_auth/session/Default/Local Storage/leveldb/MANIFEST-000001
-2025/07/14-17:47:12.215 b514 Recovering log #8
-2025/07/14-17:47:12.216 b514 Reusing old log /home/guigga/botzap/.wwebjs_auth/session/Default/Local Storage/leveldb/000008.log 
-2025/07/14-17:48:13.749 b552 Level-0 table #11: started
-2025/07/14-17:48:13.756 b552 Level-0 table #11: 13803 bytes OK
-2025/07/14-17:48:13.766 b552 Delete type=0 #8
+2025/07/14-22:46:59.990 184a Creating DB /home/guigga/botzap/.wwebjs_auth/session/Default/Local Storage/leveldb since it was missing.
+2025/07/14-22:47:00.014 184a Reusing MANIFEST /home/guigga/botzap/.wwebjs_auth/session/Default/Local Storage/leveldb/MANIFEST-000001

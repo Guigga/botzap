@@ -101,11 +101,13 @@ async function renderizarMao(mao, outputPath) {
             ctx.drawImage(baseMolde, x, y, LARGURA_CARTA, ALTURA_CARTA);
         }
 
-        const iconMolde = moldesCarregados[carta.valor];
-        if (iconMolde) {
-            const iconX = x + (LARGURA_CARTA - iconMolde.width) / 2;
-            const iconY = y + (ALTURA_CARTA - iconMolde.height) / 2;
-            ctx.drawImage(iconMolde, iconX, iconY);
+        if (iconAssetMap[carta.valor]) {
+            const iconMolde = moldesCarregados[carta.valor];
+            if (iconMolde) {
+                const iconX = x + (LARGURA_CARTA - iconMolde.width) / 2;
+                const iconY = y + (ALTURA_CARTA - iconMolde.height) / 2;
+                ctx.drawImage(iconMolde, iconX, iconY);
+            }
         }
 
         const temDesignProprio = ['curinga', '+4', 'reverso', 'pular'].includes(carta.valor);
