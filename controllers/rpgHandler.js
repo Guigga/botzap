@@ -78,6 +78,7 @@ async function handleRpgCommand(message) {
                 `*--- Comandos de Ficha ---*\n` +
                 `• \`!criar-ficha\`: Cria sua ficha de personagem.\n` +
                 `• \`!ficha\`: Mostra sua ficha atual.\n` +
+                `• \!ficha-completa\` - Exibe a ficha detalhada.` +
                 `• \`!set <atr>=<val>\`: Modifica um atributo (Ex: \`!set hp=25\`).\n` +
                 `• \`!remover <item>\`: Remove um item do seu inventário.\n` + // <-- Adicionado para clareza
                 `• \`!apagar-ficha\`: Apaga permanentemente sua ficha.\n\n` +
@@ -96,6 +97,10 @@ async function handleRpgCommand(message) {
 
         case '!ficha':
             await fichaActions.handleVerFicha(message);
+            break;
+
+        case '!ficha-completa':
+            await fichaActions.handleVerFichaCompleta(message);
             break;
             
         case '!set':
@@ -148,44 +153,44 @@ async function handleRpgCommand(message) {
 
         case '!rmvataque':
             await fichaActions.handleRmvAtaque(message);
-            break;    
+            break;
+
+        case '!inventario':
+            await fichaActions.handleVerInventario(message);
+            break;
 
         case '!rpg-ajuda':
         case '!rpg-help':
             const ajudaDetalhada = 
 `*Guia de Comandos - Módulo RPG* 📖
 
-*--- Ficha de Personagem ---*
-• \`!criar-ficha [nome] [classe] [raça]\`
+*--- Personagem ---*
+• \`!criar-ficha [nome]\`
 • \`!ficha\` - Exibe sua ficha completa.
+• \`!ficha-completa\` - Exibe a ficha detalhada.
 • \`!apagar-ficha\` - Apaga sua ficha.
-• \`!set <atr>=<valor>\` - Modifica um atributo.
-  _Ex: \`!set historia=Vim de uma terra...\`_
 • \`!classes\` / \`!racas\` - Mostra as opções.
-_Cria um personagem. Todos os campos são opcionais._
 
-• \`!ficha\`
-_Exibe sua ficha completa._
+• Modificar atributos:
+    \`!set <atr>=<valor>\`.
+    Ex: !set classe=Guerreiro, !set raca=Humano,
+    !set hp_max=20, !set hp_atual=20, !set ca=15, !set for=10...
 
-• \`!set <atr>=<val>\`
-_Modifica um atributo. Use com 'classe' ou 'raça' para aplicar seus padrões._
+*--- Inventário Avançado ---*
+• \`!inventario\` - Mostra o inventário detalhado.
+• \`!add <nome>, [qtd], [peso], [desc]\`
+  _Adiciona um item. Qtd, peso e desc são opcionais._
+  _Ex: \`!add Poção de Cura, 2, 0.5, Cura 2d4 PV\`_
+• \`!rmv <nome>, [qtd]\`
+  _Remove um item. Se não passar qtd, remove todos._
 
-• \`!classes\` / \`!racas\`
-_Mostra as opções disponíveis._
-
-• \`!apagar-ficha\`
-_Apaga PERMANENTEMENTE sua ficha._
-
-*--- Listas do Personagem ---*
-• \`!add <item>\` / \`!rmv <item>\`
+*--- Listas Simples ---*
 • \`!addhab <habilidade>\` / \`!rmvhab <hab>\`
 • \`!addataque <ataque>\` / \`!rmvataque <ataque>\`
 • \`!addmagia <magia>\` / \`!rmvmagia <magia>\`
-  _Use vírgulas para adicionar vários de uma vez._
 
 *--- Rolagem de Dados ---*
-• \`!dados <N>d<L>+/-<M>\`
-_Rola dados com modificadores._`;
+• \`!dados <N>d<L>+/-<M>\` ou \`!<N>d<L>+/-<M>\``;
             
             await message.reply(ajudaDetalhada);
             break;

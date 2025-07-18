@@ -122,10 +122,10 @@ async function handleCommand(message, client) {
         }
 
         const rpgCommandsList = [
-            '!rpg', '!dados', '!criar-ficha', '!ficha', '!set', '!apagar-ficha', 
+            '!rpg', '!dados', '!criar-ficha', '!ficha', '!ficha-completa', '!set', '!apagar-ficha', 
             '!remover', '!rpg-ajuda', '!rpg-help', '!add', '!rmv', '!classes', 
             '!racas', '!addhab', '!rmvhab', '!addmagia', '!rmvmagia', 
-            '!addataque', '!rmvataque'
+            '!addataque', '!rmvataque', '!inventario'
         ];
         const isDiceShorthand = command.match(/^!(\d+d\d+.*)$/i);
 

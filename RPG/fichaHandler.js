@@ -1,12 +1,9 @@
-// RPG/fichaHandler.js
-
 // Importações
 const Ficha = require('../models/Ficha');
 const ARQUETIPOS = require('./classes');
 const RACAS = require('./racas.js');
 
 const ATRIBUTO_LIMITES = {
-    // Atributos Principais
     nome: { type: 'string', maxLength: 50 },
     classe: { type: 'string', maxLength: 50 },
     raca: { type: 'string', maxLength: 50 },
@@ -20,19 +17,17 @@ const ATRIBUTO_LIMITES = {
     inteligencia: { type: 'number', min: 1, max: 100 },
     sabedoria: { type: 'number', min: 1, max: 100 },
     carisma: { type: 'number', min: 1, max: 100 },
-
-    // Detalhes Físicos
     idade: { type: 'string', maxLength: 30 },
     altura: { type: 'string', maxLength: 30 },
     peso: { type: 'string', maxLength: 30 },
-    // Detalhes Narrativos
     alinhamento: { type: 'string', maxLength: 50 },
-    antecedente: { type: 'string', maxLength: 150 },
+    antecedente: { type: 'string', maxLength: 2048 },
     divindade: { type: 'string', maxLength: 50 },
     historia: { type: 'string', maxLength: 2048 },
 };
 
 // --- FUNÇÕES HELPER ---
+
 function aplicarArquétipo(ficha, nomeClasse) {
     const arquétipo = ARQUETIPOS[nomeClasse.toLowerCase()];
     if (!arquétipo) return;
@@ -40,6 +35,7 @@ function aplicarArquétipo(ficha, nomeClasse) {
         ficha[key] = arquétipo[key];
     });
     ficha.classe = nomeClasse.charAt(0).toUpperCase() + nomeClasse.slice(1);
+    ficha.carga_maxima = (ficha.forca || 10) * 5;
 }
 
 function aplicarRaca(ficha, nomeRaca) {
@@ -51,185 +47,294 @@ function aplicarRaca(ficha, nomeRaca) {
         }
     });
     ficha.raca = nomeRaca.charAt(0).toUpperCase() + nomeRaca.slice(1);
+    ficha.carga_maxima = (ficha.forca || 10) * 5;
+}
+
+function recalcularCarga(ficha) {
+    let cargaTotal = 0;
+    if (ficha.inventario && ficha.inventario.length > 0) {
+        ficha.inventario.forEach(item => {
+            cargaTotal += (item.peso || 0) * (item.quantidade || 0);
+        });
+    }
+    ficha.carga_atual = parseFloat(cargaTotal.toFixed(2));
+}
+
+function formatarInventarioResumido(inventario) {
+    if (!inventario || inventario.length === 0) {
+        return "_Vazio_\n_Use !inventario para ver os detalhes._";
+    }
+    const ultimosItens = inventario.slice(-3);
+    const itensFormatados = ultimosItens.map(item => `• ${item.nome} (x${item.quantidade})`).join('\n');
+    return `${itensFormatados}\n_Use !inventario para ver os detalhes._`;
 }
 
 // --- FUNÇÕES DE COMANDO ---
 
 async function handleCriarFicha(message) {
     const playerId = message.author || message.from;
+
+    // 1. Verifica se o JOGADOR já tem uma ficha
     const fichaExistente = await Ficha.findOne({ playerId: playerId });
     if (fichaExistente) {
-        return message.reply('❌ Você já possui uma ficha. Use `!apagar-ficha` para recomeçar.');
-    }
-
-    const args = message.body.split(' ').slice(1);
-    const nomePersonagem = args[0];
-    const classePersonagem = args[1];
-    const racaPersonagem = args[2];
-
-    let fichaData = { playerId: playerId, nome: nomePersonagem || "Sem Nome" };
-
-    if (classePersonagem) {
-        const classeNormalizada = classePersonagem.toLowerCase();
-        if (ARQUETIPOS[classeNormalizada]) {
-            Object.assign(fichaData, ARQUETIPOS[classeNormalizada]);
-            fichaData.classe = classeNormalizada.charAt(0).toUpperCase() + classeNormalizada.slice(1);
-        } else {
-            const classesDisponiveis = Object.keys(ARQUETIPOS).map(c => c.charAt(0).toUpperCase() + c.slice(1)).join(', ');
-            return message.reply(`❌ Classe "*${classePersonagem}*" inválida.\n\nClasses disponíveis: ${classesDisponiveis}.`);
-        }
-    }
-
-    if (racaPersonagem) {
-        const racaNormalizada = racaPersonagem.toLowerCase();
-        if (RACAS[racaNormalizada]) {
-            aplicarRaca(fichaData, racaNormalizada);
-        } else {
-            const racasDisponiveis = Object.keys(RACAS).map(r => r.charAt(0).toUpperCase() + r.slice(1)).join(', ');
-            return message.reply(`❌ Raça "*${racaPersonagem}*" inválida.\n\nRaças disponíveis: ${racasDisponiveis}.`);
-        }
+        return message.reply(`❌ Você já possui uma ficha com o nome *${fichaExistente.nome}*. Use \`!apagar-ficha\` para recomeçar.`);
     }
     
+    // 2. Valida se um nome foi fornecido e o captura
+    const nomePersonagem = message.body.split(' ').slice(1).join(' ').trim();
+    if (!nomePersonagem) {
+        return message.reply('❌ Formato inválido. Você precisa fornecer um nome. Use: `!criar-ficha <nome do personagem>`');
+    }
+
+    // 3. Verifica se o NOME do personagem já existe no banco de dados
+    const nomeExistente = await Ficha.findOne({ nome: { $regex: new RegExp(`^${nomePersonagem}$`, 'i') } });
+    if (nomeExistente) {
+        return message.reply(`❌ Já existe um personagem com o nome "*${nomePersonagem}*". Por favor, escolha outro nome.`);
+    }
+
+    // Cria a ficha apenas com o nome, o resto usará os valores padrão do Schema
+    const fichaData = {
+        playerId: playerId,
+        nome: nomePersonagem,
+    };
+    
     await Ficha.create(fichaData);
-    await message.reply(`✅ Ficha para *${fichaData.nome}* (${fichaData.raca || 'N/A'}, ${fichaData.classe || 'N/A'}) criada com sucesso! Use \`!ficha\` para vê-la.`);
+    await message.reply(`✅ Ficha para *${fichaData.nome}* criada com sucesso! Use o comando \`!set\` para definir classe, raça e outros atributos.`);
 }
+
+async function findFicha(message) {
+    const args = message.body.split(' ').slice(1);
+    const nomeBusca = args.join(' ').trim();
+
+    if (nomeBusca) {
+        // Busca por nome (case-insensitive)
+        const ficha = await Ficha.findOne({ nome: { $regex: new RegExp(`^${nomeBusca}$`, 'i') } });
+        if (!ficha) {
+            await message.reply(`❌ Ficha com o nome "*${nomeBusca}*" não encontrada.`);
+            return null;
+        }
+        return ficha;
+    } else {
+        // Busca pelo ID do jogador que enviou a mensagem
+        const playerId = message.author || message.from;
+        const ficha = await Ficha.findOne({ playerId: playerId });
+        if (!ficha) {
+            await message.reply('❌ Você ainda não tem uma ficha. Crie uma com `!criar-ficha <nome>`.');
+            return null;
+        }
+        return ficha;
+    }
+}
+
 
 async function handleSetAtributo(message) {
     const playerId = message.author || message.from;
     const ficha = await Ficha.findOne({ playerId: playerId });
-
-    if (!ficha) {
-        return message.reply('Você ainda não tem uma ficha. Crie uma com `!criar-ficha`.');
-    }
+    if (!ficha) return message.reply('Você ainda não tem uma ficha.');
 
     const args = message.body.split(' ').slice(1).join(' ');
     const parts = args.split('=');
     let chave = parts[0].trim().toLowerCase();
     const valor = parts.slice(1).join('=').trim();
+    if (!chave || !valor) return message.reply('Formato inválido.');
 
-    if (!chave || !valor) {
-        return message.reply('Formato inválido. Use `!set <atributo>=<valor>`.');
-    }
-
-    const aliasAtributos = {
-        for: 'forca', des: 'destreza', con: 'constituicao', int: 'inteligencia',
-        sab: 'sabedoria', car: 'carisma', hp: 'hp_atual'
-    };
-    if (aliasAtributos[chave]) chave = aliasAtributos[chave];
+    const alias = { for: 'forca', des: 'destreza', con: 'constituicao', int: 'inteligencia', sab: 'sabedoria', car: 'carisma' };
+    if (alias[chave]) chave = alias[chave];
 
     if (chave === 'classe' || chave === 'raca') {
         if (chave === 'classe') {
-            const novaClasse = valor.toLowerCase();
-            if (!ARQUETIPOS[novaClasse]) {
-                const classesDisponiveis = Object.keys(ARQUETIPOS).map(c => c.charAt(0).toUpperCase() + c.slice(1)).join(', ');
-                return message.reply(`❌ Classe "*${valor}*" inválida.\n\nClasses disponíveis: ${classesDisponiveis}.`);
-            }
-            ficha.classe = ARQUETIPOS[novaClasse] ? (novaClasse.charAt(0).toUpperCase() + novaClasse.slice(1)) : ficha.classe;
+            if (!ARQUETIPOS[valor.toLowerCase()]) return message.reply(`❌ Classe "*${valor}*" inválida.`);
+            ficha.classe = valor.charAt(0).toUpperCase() + valor.slice(1).toLowerCase();
         }
         if (chave === 'raca') {
-            const novaRaca = valor.toLowerCase();
-            if (!RACAS[novaRaca]) {
-                const racasDisponiveis = Object.keys(RACAS).map(r => r.charAt(0).toUpperCase() + r.slice(1)).join(', ');
-                return message.reply(`❌ Raça "*${valor}*" inválida.\n\nRaças disponíveis: ${racasDisponiveis}.`);
-            }
-            ficha.raca = RACAS[novaRaca] ? (novaRaca.charAt(0).toUpperCase() + novaRaca.slice(1)) : ficha.raca;
+            if (!RACAS[valor.toLowerCase()]) return message.reply(`❌ Raça "*${valor}*" inválida.`);
+            ficha.raca = valor.charAt(0).toUpperCase() + valor.slice(1).toLowerCase();
         }
-
-        // Recalcular atributos
+        
         if (ficha.classe && ficha.classe !== 'N/A') aplicarArquétipo(ficha, ficha.classe);
         if (ficha.raca && ficha.raca !== 'N/A') aplicarRaca(ficha, ficha.raca);
         
         await ficha.save();
         return message.reply(`✅ Atributos recalculados para a nova ${chave}!`);
     }
-    
+
+    if (chave === 'forca') ficha.carga_maxima = (Number(valor) || 10) * 5;
+
     const limite = ATRIBUTO_LIMITES[chave];
     if (!limite) return message.reply(`❌ Atributo desconhecido: *${chave}*.`);
 
     if (limite.type === 'string') {
-        if (valor.length > limite.maxLength) return message.reply(`❌ O valor para *${chave}* é muito longo (máx: ${limite.maxLength} caracteres).`);
+        if (valor.length > limite.maxLength) return message.reply(`❌ Valor muito longo.`);
         ficha[chave] = valor;
     } else if (limite.type === 'number') {
         const numero = Number(valor);
-        if (isNaN(numero)) return message.reply(`❌ O valor para *${chave}* deve ser um número.`);
+        if (isNaN(numero)) return message.reply(`❌ Valor deve ser um número.`);
         const maxVal = (chave === 'hp_atual') ? ficha.hp_max : limite.max;
-        const minVal = limite.min;
-        if (numero < minVal || numero > maxVal) return message.reply(`❌ O valor para *${chave}* deve estar entre ${minVal} e ${maxVal}.`);
+        if (numero < limite.min || numero > maxVal) return message.reply(`❌ Valor fora dos limites.`);
         ficha[chave] = Math.floor(numero);
     }
     
     await ficha.save();
-    await message.reply(`✅ Atributo *${chave}* atualizado para *${valor}*!`);
+    await message.reply(`✅ Atributo *${chave}* atualizado!`);
 }
 
 async function handleVerFicha(message) {
-    const playerId = message.author || message.from;
-    const ficha = await Ficha.findOne({ playerId: playerId });
+    const ficha = await findFicha(message);
+    if (!ficha) return;
 
-    if (!ficha) return message.reply('Você ainda não tem uma ficha. Crie uma com `!criar-ficha`.');
-
-    let resposta = `*--- ${ficha.nome} ---*\n\n`;
-    resposta += `*${ficha.classe || 'N/A'} | ${ficha.raca || 'N/A'}* - Nível ${ficha.nivel}\n`;
-    resposta += `*Alinhamento:* ${ficha.alinhamento || 'N/A'} | *Divindade:* ${ficha.divindade || 'N/A'}\n\n`;
-
-    resposta += `*HP:* ${ficha.hp_atual}/${ficha.hp_max} ❤️ | *CA:* ${ficha.ca} 🛡️\n\n`;
+    let resposta = `*--- ${ficha.nome} ---*\n`;
+    resposta += `*Raça:* ${ficha.raca || 'N/A'} | *Classe:* ${ficha.classe || 'N/A'}\n`;
+    resposta += `*Nível:* ${ficha.nivel}\n`;
+    resposta += `*HP:* ${ficha.hp_atual}/${ficha.hp_max} ❤️\n`;
+    resposta += `*CA:* ${ficha.ca} 🛡️\n\n`;
+    resposta += `*Atributos:*\nFor: ${ficha.forca} | Des: ${ficha.destreza} | Con: ${ficha.constituicao}\n`;
+    resposta += `Int: ${ficha.inteligencia} | Sab: ${ficha.sabedoria} | Car: ${ficha.carisma}\n\n`;
+    resposta += `*Inventário (${ficha.carga_atual}/${ficha.carga_maxima} kg):*\n`;
+    resposta += formatarInventarioResumido(ficha.inventario);
     
-    resposta += `*Atributos:*\nFor: ${ficha.forca} | Des: ${ficha.destreza} | Con: ${ficha.constituicao} \nInt: ${ficha.inteligencia}  | Sab: ${ficha.sabedoria} | Car: ${ficha.carisma}\n\n`;
-
-    resposta += `*Ataques ⚔*\n${ficha.ataques && ficha.ataques.length > 0 ? `• ${ficha.ataques.join('\n• ')}` : "_Nenhum_"}\n\n`;
-    resposta += `*Magias ✨*\n${ficha.magias && ficha.magias.length > 0 ? `• ${ficha.magias.join('\n• ')}` : "_Nenhuma_"}\n\n`;
-    resposta += `*Habilidades* 💪\n${ficha.habilidades && ficha.habilidades.length > 0 ? `• ${ficha.habilidades.join('\n• ')}` : "_Nenhuma_"}\n\n`;
-    resposta += `*Inventário* 🎒\n${ficha.inventario && ficha.inventario.length > 0 ? `• ${ficha.inventario.join('\n• ')}` : "_Vazio_"}\n\n`;
-
-    resposta += `*Detalhes Pessoais:* 👤\nIdade: ${ficha.idade || 'N/A'} | Altura: ${ficha.altura || 'N/A'} | Peso: ${ficha.peso || 'N/A'}\n\n`;
-    
-    resposta += `*Antecedente:* 📜 ${ficha.antecedente || 'N/A'}\n\n`;
-    resposta += `*História* 📖 ${ficha.historia || 'N/A'}\n`;
-
-    resposta += `\n---\n_Para ajuda com os comandos, digite !rpg-help_`;
+    resposta += `\n\n---\n_Para ajuda com os comandos, digite !rpg-help_`;
 
     await message.reply(resposta);
 }
 
-// --- FUNÇÕES DE GERENCIAMENTO DE LISTAS ---
-async function gerenciarLista(message, tipo) {
+async function handleVerFichaCompleta(message) {
+    const ficha = await findFicha(message);
+    if (!ficha) return;
+
+    let resposta = `*--- ${ficha.nome} ---*\n\n`;
+    resposta += `*${ficha.classe || 'N/A'} | ${ficha.raca || 'N/A'}* - Nível ${ficha.nivel}\n`;
+    resposta += `*Alinhamento:* ${ficha.alinhamento || 'N/A'}\n*Divindade:* ${ficha.divindade || 'N/A'}\n\n`;
+    resposta += `*HP:* ${ficha.hp_atual}/${ficha.hp_max} ❤️ | *CA:* ${ficha.ca} 🛡️\n\n`;
+    resposta += `*Atributos:*\nFor: ${ficha.forca} | Des: ${ficha.destreza} | Con: ${ficha.constituicao}\nInt: ${ficha.inteligencia}  | Sab: ${ficha.sabedoria} | Car: ${ficha.carisma}\n\n`;
+    resposta += `*Ataques ⚔*\n${ficha.ataques && ficha.ataques.length > 0 ? `• ${ficha.ataques.join('\n• ')}` : "_Nenhum_"}\n\n`;
+    resposta += `*Magias ✨*\n${ficha.magias && ficha.magias.length > 0 ? `• ${ficha.magias.join('\n• ')}` : "_Nenhuma_"}\n\n`;
+    resposta += `*Habilidades* 💪\n${ficha.habilidades && ficha.habilidades.length > 0 ? `• ${ficha.habilidades.join('\n• ')}` : "_Nenhuma_"}\n\n`;
+    resposta += `*Inventário (${ficha.carga_atual}/${ficha.carga_maxima} kg)* 🎒\n`;
+    resposta += formatarInventarioResumido(ficha.inventario);
+    resposta += `\n\n`;
+    resposta += `*Detalhes Pessoais:* 👤\nIdade: ${ficha.idade || 'N/A'} | Altura: ${ficha.altura || 'N/A'} | Peso: ${ficha.peso || 'N/A'}\n\n`;
+    resposta += `*Antecedente:* 📜 ${ficha.antecedente || 'N/A'}\n\n`;
+    resposta += `*História* 📖 ${ficha.historia || 'N/A'}\n`;
+    resposta += `\n_Para ajuda com os comandos, digite:_ \n!rpg-help`;
+
+    await message.reply(resposta);
+}
+
+async function handleAddItem(message) {
+    const playerId = message.author || message.from;
+    const ficha = await Ficha.findOne({ playerId: playerId });
+    if (!ficha) return message.reply('❌ Você não tem uma ficha.');
+
+    const args = message.body.split(' ').slice(1).join(' ').split(',').map(arg => arg.trim());
+    const nome = args[0];
+    if (!nome) return message.reply('Formato inválido. Use `!add <nome>, [qtd], [peso], [desc]`');
+
+    const quantidade = parseInt(args[1]) || 1;
+    const peso = parseFloat(args[2]) || 0;
+    const descricao = args[3] || 'N/A';
+
+    const itemExistente = ficha.inventario.find(item => item.nome.toLowerCase() === nome.toLowerCase());
+
+    if (itemExistente) {
+        itemExistente.quantidade += quantidade;
+    } else {
+        if (ficha.inventario.length >= 50) return message.reply('❌ Inventário cheio (limite de 50 tipos de itens).');
+        ficha.inventario.push({ nome, quantidade, peso, descricao });
+    }
+
+    recalcularCarga(ficha);
+    await ficha.save();
+    
+    let resposta = `✅ *${quantidade}x ${nome}* adicionado(s).`;
+    if (ficha.carga_atual > ficha.carga_maxima) {
+        resposta += `\n⚠️ *Atenção: Você está sobrecarregado!* (${ficha.carga_atual}/${ficha.carga_maxima} kg)`;
+    }
+    await message.reply(resposta);
+}
+
+async function handleRemoveItem(message) {
+    const playerId = message.author || message.from;
+    const ficha = await Ficha.findOne({ playerId: playerId });
+    if (!ficha || ficha.inventario.length === 0) return message.reply('❌ Seu inventário está vazio.');
+
+    const args = message.body.split(' ').slice(1).join(' ').split(',').map(arg => arg.trim());
+    const nome = args[0];
+    if (!nome) return message.reply('Formato inválido. Use `!rmv <nome>, [qtd]`');
+
+    const quantidadeRemover = parseInt(args[1]);
+    const itemIndex = ficha.inventario.findIndex(item => item.nome.toLowerCase() === nome.toLowerCase());
+    if (itemIndex === -1) return message.reply(`❌ Item "*${nome}*" não encontrado.`);
+
+    const item = ficha.inventario[itemIndex];
+    
+    if (isNaN(quantidadeRemover) || quantidadeRemover >= item.quantidade) {
+        ficha.inventario.splice(itemIndex, 1);
+        await message.reply(`✅ Todos os itens "*${item.nome}*" foram removidos.`);
+    } else {
+        item.quantidade -= quantidadeRemover;
+        await message.reply(`✅ *${quantidadeRemover}x ${item.nome}* removido(s). Restam: ${item.quantidade}.`);
+    }
+
+    recalcularCarga(ficha);
+    await ficha.save();
+}
+
+async function handleVerInventario(message) {
+    const playerId = message.author || message.from;
+    const ficha = await Ficha.findOne({ playerId: playerId });
+    if (!ficha) return message.reply('❌ Você não tem uma ficha.');
+
+    let resposta = `*--- Inventário de ${ficha.nome} ---*\n`;
+    resposta += `*Carga Total:* ${ficha.carga_atual} / ${ficha.carga_maxima} kg\n\n`;
+
+    if (ficha.inventario.length === 0) {
+        resposta += "_Vazio_";
+    } else {
+        ficha.inventario.forEach(item => {
+            resposta += `*• ${item.nome} (x${item.quantidade})*\n`;
+            resposta += `  _Peso: ${item.peso} kg | Desc: ${item.descricao}_\n`;
+        });
+    }
+    
+    if (ficha.carga_atual > ficha.carga_maxima) {
+        resposta += `\n\n⚠️ *Atenção: Você está sobrecarregado!*`;
+    }
+    await message.reply(resposta);
+}
+
+async function gerenciarListaSimples(message, tipo) {
     const acao = message.body.startsWith('!add') ? 'add' : 'remove';
-    const singular = tipo.slice(0, -1); // Ex: 'magias' -> 'magia'
-    const limite = { magias: 50, ataques: 10, habilidades: 20, inventario: 20 }[tipo];
+    const singular = tipo.slice(0, -1);
+    const limite = { magias: 50, ataques: 10, habilidades: 20 }[tipo];
 
     const playerId = message.author || message.from;
     const ficha = await Ficha.findOne({ playerId: playerId });
     if (!ficha) return message.reply('❌ Você não tem uma ficha.');
 
-    if (acao === 'remove' && (!ficha[tipo] || ficha[tipo].length === 0)) {
-        return message.reply(`❌ Você não tem ${tipo} para remover.`);
-    }
+    if (acao === 'remove' && (!ficha[tipo] || ficha[tipo].length === 0)) return message.reply(`❌ Você não tem ${tipo} para remover.`);
 
     const valor = message.body.split(' ').slice(1).join(' ').trim();
-    if (!valor) return message.reply(`Formato inválido. Use \`!${acao}${singular} <nome>\``);
+    if (!valor) return message.reply(`Formato inválido.`);
 
     if (acao === 'add') {
         const novosItens = valor.split(',').map(i => i.trim().substring(0, 100)).filter(i => i);
         if ((ficha[tipo].length + novosItens.length) > limite) return message.reply(`❌ Limite de ${limite} ${tipo} atingido.`);
         await Ficha.updateOne({ playerId: playerId }, { $push: { [tipo]: { $each: novosItens } } });
-        await message.reply(`✅ ${singular.charAt(0).toUpperCase() + singular.slice(1)}(s) adicionado(s): *${novosItens.join(', ')}*`);
-    } else { // remover
+        await message.reply(`✅ ${singular}(s) adicionado(s): *${novosItens.join(', ')}*`);
+    } else {
         const itemParaRemover = ficha[tipo].find(i => i.toLowerCase() === valor.toLowerCase());
-        if (!itemParaRemover) return message.reply(`❌ ${singular.charAt(0).toUpperCase() + singular.slice(1)} "*${valor}*" não encontrado.`);
+        if (!itemParaRemover) return message.reply(`❌ ${singular} "*${valor}*" não encontrado.`);
         await Ficha.updateOne({ playerId: playerId }, { $pull: { [tipo]: itemParaRemover } });
-        await message.reply(`✅ ${singular.charAt(0).toUpperCase() + singular.slice(1)} "*${itemParaRemover}*" removido.`);
+        await message.reply(`✅ ${singular} "*${itemParaRemover}*" removido.`);
     }
 }
 
-const handleAddItem = (message) => gerenciarLista(message, 'inventario');
-const handleRemoveItem = (message) => gerenciarLista(message, 'inventario');
-const handleAddHabilidade = (message) => gerenciarLista(message, 'habilidades');
-const handleRmvHabilidade = (message) => gerenciarLista(message, 'habilidades');
-const handleAddAtaque = (message) => gerenciarLista(message, 'ataques');
-const handleRmvAtaque = (message) => gerenciarLista(message, 'ataques');
-const handleAddMagia = (message) => gerenciarLista(message, 'magias');
-const handleRmvMagia = (message) => gerenciarLista(message, 'magias');
-
+const handleAddHabilidade = (message) => gerenciarListaSimples(message, 'habilidades');
+const handleRmvHabilidade = (message) => gerenciarListaSimples(message, 'habilidades');
+const handleAddAtaque = (message) => gerenciarListaSimples(message, 'ataques');
+const handleRmvAtaque = (message) => gerenciarListaSimples(message, 'ataques');
+const handleAddMagia = (message) => gerenciarListaSimples(message, 'magias');
+const handleRmvMagia = (message) => gerenciarListaSimples(message, 'magias');
 
 async function handleApagarFicha(message) {
     const playerId = message.author || message.from;
@@ -262,8 +367,8 @@ async function handleVerRacas(message) {
 }
 
 module.exports = {
-    handleCriarFicha, handleVerFicha, handleSetAtributo, handleAddItem,
+    handleCriarFicha, handleVerFicha, handleVerFichaCompleta, handleSetAtributo, handleAddItem,
     handleRemoveItem, handleAddHabilidade, handleRmvHabilidade, handleAddAtaque,
     handleRmvAtaque, handleAddMagia, handleRmvMagia, handleApagarFicha,
-    handleVerClasses, handleVerRacas
+    handleVerClasses, handleVerRacas, handleVerInventario
 };
