@@ -15,6 +15,7 @@
     "canvas": "^3.1.2",
     "chess-engine": "^0.0.0",
     "chess.js": "^1.4.0",
+    "csv-parse": "^6.0.0",
     "jimp": "^0.16.1",
     "play-dl": "^1.9.7",
     "poker-evaluator": "^2.1.0",

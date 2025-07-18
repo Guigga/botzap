@@ -1,0 +1,19 @@
+{
+  "nome": "Guigaralho Bala Certa",
+  "classe": "Guerreiro",
+  "nivel": 18,
+  "hp_max": 100,
+  "hp_atual": 10,
+  "ca": 10,
+  "forca": 10,
+  "destreza": 10,
+  "constituicao": 10,
+  "inteligencia": 10,
+  "sabedoria": 10,
+  "carisma": 10,
+  "inventario": [
+    "Gume do Infinito",
+    "Canhão Fumegante",
+    "Sedenta por Sangue"
+  ]
+}
