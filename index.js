@@ -1,3 +1,5 @@
+require('dotenv').config();
+const connectDB = require('./config/db');
 const { client } = require('./client');
 const handleCommand = require('./controllers/commandHandler');
 
@@ -28,3 +30,5 @@ client.on('message', async (message) => {
     }
   }
 });
+
+connectDB();

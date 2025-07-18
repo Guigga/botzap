@@ -118,49 +118,74 @@ async function handleRpgCommand(message) {
             await fichaActions.handleApagarFicha(message);
             break;
 
+        case '!classes':
+            await fichaActions.handleVerClasses(message);
+            break;
+
+        case '!racas':
+            await fichaActions.handleVerRacas(message);
+            break;
+
+        case '!addhab':
+            await fichaActions.handleAddHabilidade(message);
+            break;
+        
+        case '!rmvhab':
+            await fichaActions.handleRmvHabilidade(message);
+            break;
+
+        case '!addmagia':
+            await fichaActions.handleAddMagia(message);
+            break;
+
+        case '!rmvmagia':
+            await fichaActions.handleRmvMagia(message);
+            break;
+
+        case '!addataque':
+            await fichaActions.handleAddAtaque(message);
+            break;
+
+        case '!rmvataque':
+            await fichaActions.handleRmvAtaque(message);
+            break;    
+
         case '!rpg-ajuda':
         case '!rpg-help':
             const ajudaDetalhada = 
 `*Guia de Comandos - Módulo RPG* 📖
 
-Aqui estão todos os comandos que você pode usar para gerenciar sua aventura!
-
 *--- Ficha de Personagem ---*
-
-• \`!criar-ficha\`
-_Cria um novo personagem com atributos padrão. Você só pode ter uma ficha por vez._
+• \`!criar-ficha [nome] [classe] [raça]\`
+• \`!ficha\` - Exibe sua ficha completa.
+• \`!apagar-ficha\` - Apaga sua ficha.
+• \`!set <atr>=<valor>\` - Modifica um atributo.
+  _Ex: \`!set historia=Vim de uma terra...\`_
+• \`!classes\` / \`!racas\` - Mostra as opções.
+_Cria um personagem. Todos os campos são opcionais._
 
 • \`!ficha\`
-_Exibe sua ficha de personagem completa, com todos os atributos, HP, e inventário._
+_Exibe sua ficha completa._
+
+• \`!set <atr>=<val>\`
+_Modifica um atributo. Use com 'classe' ou 'raça' para aplicar seus padrões._
+
+• \`!classes\` / \`!racas\`
+_Mostra as opções disponíveis._
 
 • \`!apagar-ficha\`
-_Apaga PERMANENTEMENTE sua ficha. Use com cuidado!_
+_Apaga PERMANENTEMENTE sua ficha._
 
-• \`!set <atributo>=<valor>\`
-_O comando mais importante! Serve para modificar QUALQUER atributo da sua ficha._
-  *Exemplos:*
-  \`!set nome=Aragorn\`
-  \`!set hp_atual=25\`
-  \`!set hp_max=50\`
-
-*--- Inventário ---*
-• \`!add <item1>, <item2>\`
-_Adiciona um ou mais itens ao seu inventário._
-  *Ex: \`!add Tocha, Corda\`*
-
-• \`!rmv=<nome do item>\`
-_Remove um item do seu inventário._
-  *Ex: \`!rmv Tocha\`*
+*--- Listas do Personagem ---*
+• \`!add <item>\` / \`!rmv <item>\`
+• \`!addhab <habilidade>\` / \`!rmvhab <hab>\`
+• \`!addataque <ataque>\` / \`!rmvataque <ataque>\`
+• \`!addmagia <magia>\` / \`!rmvmagia <magia>\`
+  _Use vírgulas para adicionar vários de uma vez._
 
 *--- Rolagem de Dados ---*
-
-• \`!dados <N>d<L>+/-<M>\` ou \`!<N>d<L>+/-<M>\`
-_Rola N dados de L lados com um modificador M._
-  *Exemplos:*
-  \`!dados 2d6\` (rola 2 dados de 6 lados)
-  \`!1d20\` (rola 1 dado de 20 lados)
-  \`!3d8+5\` (rola 3 dados de 8 lados e soma 5 ao total)
-  \`!2d10-2\` (rola 2 dados de 10 lados e subtrai 2 do total)`;
+• \`!dados <N>d<L>+/-<M>\`
+_Rola dados com modificadores._`;
             
             await message.reply(ajudaDetalhada);
             break;

@@ -121,7 +121,12 @@ async function handleCommand(message, client) {
             return;
         }
 
-        const rpgCommandsList = ['!rpg', '!dados', '!criar-ficha', '!ficha', '!set', '!apagar-ficha', '!remover', '!rpg-ajuda', '!rpg-help', '!add', '!rmv'];
+        const rpgCommandsList = [
+            '!rpg', '!dados', '!criar-ficha', '!ficha', '!set', '!apagar-ficha', 
+            '!remover', '!rpg-ajuda', '!rpg-help', '!add', '!rmv', '!classes', 
+            '!racas', '!addhab', '!rmvhab', '!addmagia', '!rmvmagia', 
+            '!addataque', '!rmvataque'
+        ];
         const isDiceShorthand = command.match(/^!(\d+d\d+.*)$/i);
 
         // --- Roteamento para o Módulo de RPG ---
