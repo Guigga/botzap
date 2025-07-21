@@ -107,6 +107,7 @@ module.exports = {
                 console.error("Erro ao apagar compromisso:", error);
                 await message.reply("❌ Ocorreu um erro ao tentar apagar o compromisso.");
             }
+            
             return;
         }
     }
