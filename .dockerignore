@@ -2,5 +2,7 @@
 /node_modules
 .dockerignore
 .env
+chave-botzap.pem
+chave-botzap
 Dockerfile
 fly.toml
