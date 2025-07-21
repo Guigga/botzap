@@ -6,6 +6,7 @@ projeto_completo.txt
 .dockerignore
 chave-botzap
 chave-botzap.pem
+credentials.json
 
 
 # managed

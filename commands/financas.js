@@ -54,6 +54,12 @@ module.exports = {
             });
             await novaTransacao.save();
 
+            try {
+                await sheetsService.adicionarTransacao(novaTransacao);
+            } catch (sheetsError) {
+                console.error("Falha ao enviar dados para o Google Sheets, mas a transação foi salva no DB.", sheetsError);
+            }
+
             const tipoCapitalized = tipo.charAt(0).toUpperCase() + tipo.slice(1);
             await message.reply(
                 `✅ *${tipoCapitalized} registrado para ${message._data.notifyName}!* \n\n` +
