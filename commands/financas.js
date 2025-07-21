@@ -1,6 +1,7 @@
 // commands/financas.js
 
 const Transacao = require('../models/Transacao');
+const sheetsService = require('../services/sheetsService');
 
 module.exports = {
     name: '!financas',
