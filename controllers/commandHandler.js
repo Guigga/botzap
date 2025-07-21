@@ -10,6 +10,7 @@ const forcaActions = require('../games/Forca/playerActions');
 const velhaActions = require('../games/Velha/playerActions');
 const unoActions = require('../games/Uno/playerActions');
 const xadrezActions = require('../games/Xadrez/playerActions');
+const Transacao = require('../models/Transacao');
 
 // --- CARREGADOR DE COMANDOS ---
 const commands = new Map();
@@ -53,6 +54,26 @@ async function handleCommand(message, client) {
             // Passamos a sessão atual para o comando, caso ele precise (ex: !sair precisa saber se há uma sessão)
             await commandModule.execute(message, command, body, client, session, commands);
             return;
+        }
+
+        let session = isGroup ? sessionManager.getSession(from) : sessionManager.getSession(sessionManager.getGroupFromPlayer(from));
+
+        if (session && session.game === 'confirmacao-limpeza') {
+            const autorDaMensagem = message.author || message.from;
+
+            // Garante que apenas o usuário que iniciou o comando pode confirmar
+            if (autorDaMensagem === session.creatorId) {
+                if (message.body.toLowerCase() === 'sim') {
+                    const adminIdString = process.env.ADMIN_WHATSAPP_ID || '';
+                    const adminIds = adminIdString.split(',').map(id => id.trim());
+                    const resultado = await Transacao.deleteMany({ userId: { $in: adminIds } });
+                    await message.reply(`✅ Confirmado! *${resultado.deletedCount}* transações foram apagadas.`);
+                } else {
+                    await message.reply('Operação cancelada.');
+                }
+                sessionManager.endSession(from); // Encerra a sessão de confirmação
+            }
+            return; // Impede que o resto do código seja executado
         }
 
         // --- ROTEADOR DE JOGO EM ANDAMENTO ---
