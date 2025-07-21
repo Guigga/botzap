@@ -4,6 +4,8 @@ const Transacao = require('../models/Transacao');
 
 module.exports = {
     name: '!limpar-financas-confirmado',
+    aliases: ['!gasto', '!g', '!ganho', '!r'],
+    category: 'financas',
     description: 'APAGA TODAS as transações financeiras. Comando de admin.',
 
     async execute(message, command, body) {
