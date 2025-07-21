@@ -14,7 +14,7 @@ function getDateForNextWeekday(weekday) {
     const todayDay = today.getDay();
     let daysToAdd = targetDay - todayDay;
 
-    // Se o dia já passou nesta semana, agendamos para a próxima
+    // Se o dia já passou nesta semana ou é hoje, agendamos para a próxima semana
     if (daysToAdd <= 0) {
         daysToAdd += 7;
     }
@@ -117,7 +117,17 @@ module.exports = {
                 const novoCompromisso = new Compromisso({ userId, titulo, dataHora: dataFinal });
                 await novoCompromisso.save();
 
-                const dataFormatada = dataFinal.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+                // --- LINHA CORRIGIDA ---
+                // Adicionamos as opções de formatação para garantir que a hora seja exibida corretamente.
+                const dataFormatada = dataFinal.toLocaleString('pt-BR', { 
+                    timeZone: 'America/Sao_Paulo',
+                    year: 'numeric',
+                    month: '2-digit',
+                    day: '2-digit',
+                    hour: '2-digit',
+                    minute: '2-digit'
+                });
+                
                 await message.reply(`✅ *Compromisso agendado!*\n\n*O quê:* ${titulo}\n*Quando:* ${dataFormatada}`);
             } catch (error) {
                 console.error("Erro ao salvar compromisso:", error);
