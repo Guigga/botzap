@@ -46,17 +46,16 @@ async function handleCommand(message, client) {
 
         const commandArgs = body.split(' ');
         const command = commandArgs[0].toLowerCase();
-        let session = isGroup ? sessionManager.getSession(from) : sessionManager.getSession(sessionManager.getGroupFromPlayer(from));
+        let session = isGroup ? sessionManager.getSession(from) : sessionManager.getSession(sessionManager.getGroupFromPlayer(from)); // <--- DECLARAÇÃO ÚNICA E CORRETA
 
-        // --- ROTEADOR DINÂMICO DE COMANDOS (para comandos sem estado ou que gerenciam estado) ---
+        // --- ROTEADOR DINÂMICO DE COMANDOS ---
         const commandModule = commands.get(command);
         if (commandModule) {
-            // Passamos a sessão atual para o comando, caso ele precise (ex: !sair precisa saber se há uma sessão)
             await commandModule.execute(message, command, body, client, session, commands);
             return;
         }
 
-        let session = isGroup ? sessionManager.getSession(from) : sessionManager.getSession(sessionManager.getGroupFromPlayer(from));
+        // A LINHA DUPLICADA FOI REMOVIDA DESTA POSIÇÃO
 
         if (session && session.game === 'confirmacao-limpeza') {
             const autorDaMensagem = message.author || message.from;
