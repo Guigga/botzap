@@ -93,13 +93,13 @@ module.exports = {
                 
                 const compromissoParaApagar = compromissosRecentes.find(
                     c => c._id.toString().slice(-5).toLowerCase() === shortId
-                ); [cite: 1899]
+                );
 
                 if (!compromissoParaApagar) {
                     return await message.reply(`❌ Nenhum compromisso encontrado com o ID \`${shortId}\`.`);
                 }
 
-                await Compromisso.findByIdAndDelete(compromissoParaApagar._id); [cite: 1900]
+                await Compromisso.findByIdAndDelete(compromissoParaApagar._id);
                 
                 await message.reply(`✅ Compromisso "*${compromissoParaApagar.titulo}*" apagado com sucesso!`);
 
