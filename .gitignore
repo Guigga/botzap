@@ -2,6 +2,8 @@ node_modules/
 zConcatenador
 .env
 projeto_completo.txt
+.Dockerfile
+.dockerignore
 
 
 # managed
