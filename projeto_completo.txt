@@ -78,6 +78,7 @@ async function handleRpgCommand(message) {
                 `*--- Comandos de Ficha ---*\n` +
                 `• \`!criar-ficha\`: Cria sua ficha de personagem.\n` +
                 `• \`!ficha\`: Mostra sua ficha atual.\n` +
+                `• \!ficha-completa\` - Exibe a ficha detalhada.` +
                 `• \`!set <atr>=<val>\`: Modifica um atributo (Ex: \`!set hp=25\`).\n` +
                 `• \`!remover <item>\`: Remove um item do seu inventário.\n` + // <-- Adicionado para clareza
                 `• \`!apagar-ficha\`: Apaga permanentemente sua ficha.\n\n` +
@@ -96,6 +97,10 @@ async function handleRpgCommand(message) {
 
         case '!ficha':
             await fichaActions.handleVerFicha(message);
+            break;
+
+        case '!ficha-completa':
+            await fichaActions.handleVerFichaCompleta(message);
             break;
             
         case '!set':
@@ -118,38 +123,74 @@ async function handleRpgCommand(message) {
             await fichaActions.handleApagarFicha(message);
             break;
 
+        case '!classes':
+            await fichaActions.handleVerClasses(message);
+            break;
+
+        case '!racas':
+            await fichaActions.handleVerRacas(message);
+            break;
+
+        case '!addhab':
+            await fichaActions.handleAddHabilidade(message);
+            break;
+        
+        case '!rmvhab':
+            await fichaActions.handleRmvHabilidade(message);
+            break;
+
+        case '!addmagia':
+            await fichaActions.handleAddMagia(message);
+            break;
+
+        case '!rmvmagia':
+            await fichaActions.handleRmvMagia(message);
+            break;
+
+        case '!addataque':
+            await fichaActions.handleAddAtaque(message);
+            break;
+
+        case '!rmvataque':
+            await fichaActions.handleRmvAtaque(message);
+            break;
+
+        case '!inventario':
+            await fichaActions.handleVerInventario(message);
+            break;
+
         case '!rpg-ajuda':
         case '!rpg-help':
             const ajudaDetalhada = 
 `*Guia de Comandos - Módulo RPG* 📖
 
-*--- Ficha de Personagem ---*
-• \`!criar-ficha <nome>\`
-_Cria um novo personagem com o nome especificado._
+*--- Personagem ---*
+• \`!criar-ficha [nome]\`
+• \`!ficha\` - Exibe sua ficha completa.
+• \`!ficha-completa\` - Exibe a ficha detalhada.
+• \`!apagar-ficha\` - Apaga sua ficha.
+• \`!classes\` / \`!racas\` - Mostra as opções.
 
-• \`!ficha\`
-_Exibe sua ficha completa._
+• Modificar atributos:
+    \`!set <atr>=<valor>\`.
+    Ex: !set classe=Guerreiro, !set raca=Humano,
+    !set hp_max=20, !set hp_atual=20, !set ca=15, !set for=10...
 
-• \`!apagar-ficha\`
-_Apaga PERMANENTEMENTE sua ficha._
+*--- Inventário Avançado ---*
+• \`!inventario\` - Mostra o inventário detalhado.
+• \`!add <nome>, [qtd], [peso], [desc]\`
+  _Adiciona um item. Qtd, peso e desc são opcionais._
+  _Ex: \`!add Poção de Cura, 2, 0.5, Cura 2d4 PV\`_
+• \`!rmv <nome>, [qtd]\`
+  _Remove um item. Se não passar qtd, remove todos._
 
-• \`!set <atributo>=<valor>\`
-_Modifica atributos como classe, nível, etc._
-  *Ex: \`!set classe=Guerreiro\`*
-
-*--- Inventário ---*
-• \`!add <item1>, <item2>\`
-_Adiciona um ou mais itens ao seu inventário._
-  *Ex: \`!add Tocha, Corda\`*
-
-• \`!rmv <nome do item>\`
-_Remove um item do seu inventário._
-  *Ex: \`!rmv Tocha\`*
+*--- Listas Simples ---*
+• \`!addhab <habilidade>\` / \`!rmvhab <hab>\`
+• \`!addataque <ataque>\` / \`!rmvataque <ataque>\`
+• \`!addmagia <magia>\` / \`!rmvmagia <magia>\`
 
 *--- Rolagem de Dados ---*
-• \`!dados <N>d<L>+/-<M>\` ou \`!<N>d<L>+/-<M>\`
-_Rola dados com modificadores._
-  *Ex: \`!1d20+5\`*`;
+• \`!dados <N>d<L>+/-<M>\` ou \`!<N>d<L>+/-<M>\``;
             
             await message.reply(ajudaDetalhada);
             break;
@@ -193,13 +234,10 @@ async function handleMusica(message, client, query) {
     }
 }
 
-module.exports = handleMusica;// C:\Users\Guilherme\bot-whatsapp\controllers\commandHandler.js
-
+module.exports = handleMusica;// controllers/commandHandler.js
 const fs = require('fs');
 const path = require('path');
-const { parse } = require('csv-parse');
 const logger = require('../utils/logger');
-const config = require('../config.json');
 const sessionManager = require('../sessions/sessionManager');
 const lobby = require('../games/lobby');
 const pokerActions = require('../games/Poker/playerActions');
@@ -208,259 +246,68 @@ const forcaActions = require('../games/Forca/playerActions');
 const velhaActions = require('../games/Velha/playerActions');
 const unoActions = require('../games/Uno/playerActions');
 const xadrezActions = require('../games/Xadrez/playerActions');
-const rpgHandler = require('./rpgHandler');
-const handleMusica = require('./musicaHandler');
-const JOGOS_VALIDOS = ['poker', 'truco', 'forca', 'velha', 'uno', 'xadrez'];
 
-const resultadosPassados = new Set();
-let megaCarregada = false;
+// --- CARREGADOR DE COMANDOS ---
+const commands = new Map();
+const commandFiles = fs.readdirSync(path.join(__dirname, '..', 'commands')).filter(file => file.endsWith('.js'));
 
-const csvFilePath = path.join(__dirname, '..', 'assets', 'mega_sena.csv');
-
-fs.createReadStream(csvFilePath)
-    .pipe(parse({ delimiter: ';', from_line: 2 }))
-    .on('data', function (row) {
-        try {
-            const numeros = row.slice(2, 8).map(Number).sort((a, b) => a - b);
-            if (numeros.length === 6 && !numeros.some(isNaN)) {
-                resultadosPassados.add(numeros.join(','));
-            }
-        } catch (e) {
-            // Ignora linhas com erro
-        }
-    })
-    .on('end', function () {
-        megaCarregada = true;
-        console.log(`[Mega-Sena] Carregados ${resultadosPassados.size} resultados históricos.`); // <<< USANDO O NOME CORRETO
-    })
-    .on('error', function (error) {
-        console.error('[Mega-Sena] Erro ao ler o arquivo CSV:', error.message);
-    });
-
-function gerarJogoInedito() {
-    if (!megaCarregada) {
-        return null;
+for (const file of commandFiles) {
+    const commandModule = require(path.join(__dirname, '..', 'commands', file));
+    if (commandModule.name) {
+        commands.set(commandModule.name.toLowerCase(), commandModule);
     }
-
-    while (true) {
-        const numeros = new Set();
-        while (numeros.size < 6) {
-            numeros.add(Math.floor(Math.random() * 60) + 1);
-        }
-        
-        const numerosOrdenados = Array.from(numeros).sort((a, b) => a - b);
-        const jogoStr = numerosOrdenados.join(',');
-
-        if (!resultadosPassados.has(jogoStr)) {
-            return numerosOrdenados;
-        }
+    if (commandModule.aliases && commandModule.aliases.length > 0) {
+        commandModule.aliases.forEach(alias => commands.set(alias.toLowerCase(), commandModule));
     }
 }
+console.log(`[Command Loader] ${commands.size} comandos e apelidos carregados.`);
 
+// --- LÓGICA PRINCIPAL ---
 async function handleCommand(message, client) {
-    try {
-        const { from, body } = message;
-        logger.log(message, `Comando recebido: ${body}`);
-        console.log(`[ID Hunter] Mensagem recebida do ID: ${from}`);
-        const isGroup = from.endsWith('@g.us');
+    try {
+        const { from, body } = message;
+        if (!body) return;
 
-        // --- NOVO BLOCO DE FILTRAGEM DE GRUPO ---
-        if (config.enableGroupFilter && isGroup && !config.allowedGroupIds.includes(from)) {
-            // O logger vai buscar o nome do contato e do chat automaticamente!
-            logger.log(message, 'Comando ignorado: grupo não está na whitelist.');
-            return;
-        }
+        logger.log(message, `Comando recebido: ${body}`);
+        const isGroup = from.endsWith('@g.us');
 
-        // --- BLOCO DE DEBUG PARA O JOGO DA FORCA NO PV ---
-        
+        const groupFilterEnabled = process.env.ENABLE_GROUP_FILTER === 'true';
+        if (groupFilterEnabled && isGroup) {
+            const allowedGroupIds = process.env.ALLOWED_GROUP_IDS ? process.env.ALLOWED_GROUP_IDS.split(',') : [];
+            if (!allowedGroupIds.includes(from)) {
+                return logger.log(message, 'Comando ignorado: grupo não permitido.');
+            }
+        }
 
         const commandArgs = body.split(' ');
         const command = commandArgs[0].toLowerCase();
-
-        // COMANDOS GLOBAIS
-        if (command === '!botzap') {
-            const botZapMessage = 
-                                  `*Como começar um jogo?*\n` +
-                                  `Digite \`!jogo <nome do jogo>\`\n\n` +
-                                  `*Jogos Disponíveis:*\n` +
-                                  `• Poker\n` +
-                                  `• Truco\n` +
-                                  `• Forca\n` +
-                                  `• Velha\n` +
-                                  `• Uno\n` +
-                                  `• Xadrez\n\n` +
-                                  `---\n\n` +
-                                  `*Outros comandos:*\n` +
-                                  `• \`!figurinha\` - Responda a uma imagem para criar um sticker.\n` +
-                                  `• \`!mega\` - Gera um número da megasena.\n` +
-                                  `• \`!moeda\` - Joga um cara ou coroa.\n` +
-                                  `• \`!bicho\` - Te da o resultado do jogo do bicho.\n` +
-                                  `• \`!responda <pergunta>\` - Responde suas perguntas com 100% de certeza.\n` +
-                                  `• \`!musica <nome>\` - Envia o link de uma música do YouTube.\n` +
-                                  `• \`!sair\` - Encerra um jogo ou lobby em andamento.\n\n` +
-                                  `Vamos começar? 🎉`;
-            await message.reply(botZapMessage);
-            return;
-        }
-
-        if (command === '!id') {
-            await message.reply(`O ID deste chat é:\n\`${from}\``);
-            return;
-        }
-
-        if (command === '!debug') {
-            console.log('===== OBJETO MESSAGE COMPLETO =====');
-            console.log(message);
-            console.log('=================================');
-            await message.reply('O objeto da mensagem foi impresso no console do bot. 😉');
-            return;
-        }
-
-        const rpgCommandsList = ['!rpg', '!dados', '!criar-ficha', '!ficha', '!set', '!apagar-ficha', '!remover', '!rpg-ajuda', '!rpg-help', '!add', '!rmv'];
-        const isDiceShorthand = command.match(/^!(\d+d\d+.*)$/i);
-
-        // --- Roteamento para o Módulo de RPG ---
-        if (rpgCommandsList.includes(command) || isDiceShorthand) {
-            await rpgHandler.handleRpgCommand(message);
-            return;
-        }
-
-        if (command === '!mega') {
-            const jogo = gerarJogoInedito();
-            if (jogo) {
-                const resultado = jogo.map(n => n.toString().padStart(2, '0')).join(' - ');
-                await message.reply(`*Combinação Inédita Encontrada!*\n\n✨ *${resultado}* ✨\n\nEssa nunca saiu! Boa sorte!`);
-            } else {
-                await message.reply('Desculpe, ainda estou processando o histórico de jogos. Tente novamente em um instante.');
-            }
-            return;
-        }        
-
-        if (command === '!moeda') {
-            await message.reply('Jogando a moeda... 🪙');
-            const resultado = Math.random() < 0.5 ? 'Cara' : 'Coroa';
-            const emoji = resultado === 'Cara' ? '🗿' : '👑';
-            await message.reply(`Deu *${resultado}*! ${emoji}`);
-            return;
-        }        
-
-        if (command === '!bicho') {
-            const animais = ['Avestruz  G1', 'Águia G2', 'Burro G3', 'Borboleta G4', 'Cachorro G5', 'Cabra G6', 'Carneiro G7', 'Camelo G8', 'Cobra G9', 'Coelho G10', 'Cavalo G11', 'Elefante G12', 'Galo G13', 'Gato G14', 'Jacaré G15', 'Leão G16', 'Macaco G17', 'Porco G18', 'Pavão G19', 'Peru G20', 'Touro G21', 'Tigre G22', 'Urso G23', 'Veado G24', 'Vaca G25'];
-            const sorteado = animais[Math.floor(Math.random() * animais.length)];
-            await message.reply(`O resultado de hoje é: *${sorteado}*`);
-            return;
-        }
-
-        if (command === '!responda') {
-            const respostas = ["Sim.", "Não.", "Com certeza!", "Definitivamente não.", "Talvez.", "Os astros indicam que sim.", "Concentre-se e pergunte de novo.", "Não conte com isso."];
-            const respostaMistica = respostas[Math.floor(Math.random() * respostas.length)];
-            await message.reply(`O Botzap responde:\n\n*${respostaMistica}*`);
-            return;
-        }        
-
-        if (command === '!figurinha' || command === '!sticker') {
-            if (message.hasQuotedMsg) {
-                const quotedMsg = await message.getQuotedMessage();
-                if (quotedMsg.hasMedia) {
-                    await message.reply("Criando sua figurinha, um momento... 🎨");
-                    try {
-                        const media = await quotedMsg.downloadMedia();
-                        await client.sendMessage(from, media, { sendMediaAsSticker: true, stickerAuthor: "BotZap 🤖", stickerName: "Criado pelo Bot" });
-                    } catch (error) {
-                        await message.reply("❌ Ih, deu erro! Tente com outra imagem ou vídeo curto.");
-                    }
-                } else {
-                    await message.reply("Você precisa responder a uma imagem ou vídeo para eu transformar em figurinha!");
-                }
-            } else {
-                await message.reply("Para criar uma figurinha, responda a uma imagem com o comando `!figurinha`.");
-            }
-            return;
-        }
-
-        if (command === '!musica') {
-            const query = commandArgs.slice(1).join(' '); 
-            return await handleMusica(message, client, query);
-        }
-        
-        // =======================================================
-        // LÓGICA DE SESSÃO DE JOGO
-        // =======================================================
-
         let session = isGroup ? sessionManager.getSession(from) : sessionManager.getSession(sessionManager.getGroupFromPlayer(from));
-        
-        if (command === '!sair') {
-            if (session) {
-                const gameName = session.game.charAt(0).toUpperCase() + session.game.slice(1);
-                if (sessionManager.endSession(session.groupId)) {
-                    await message.reply(`✅ O jogo de *${gameName}* foi encerrado.`);
+
+        // --- ROTEADOR DINÂMICO DE COMANDOS (para comandos sem estado ou que gerenciam estado) ---
+        const commandModule = commands.get(command);
+        if (commandModule) {
+            // Passamos a sessão atual para o comando, caso ele precise (ex: !sair precisa saber se há uma sessão)
+            await commandModule.execute(message, command, body, client, session);
+            return;
+        }
+
+        // --- ROTEADOR DE JOGO EM ANDAMENTO ---
+        // Se não era um comando conhecido, mas existe uma sessão, é uma ação dentro de um jogo.
+        if (session) {
+            if (session.status === 'lobby') {
+                return await lobby.handleLobbyCommand(message, session, client);
+            }
+            if (session.status === 'em_jogo') {
+                const gameActions = { poker: pokerActions, truco: trucoActions, forca: forcaActions, velha: velhaActions, uno: unoActions, xadrez: xadrezActions };
+                if (gameActions[session.game]) {
+                    return await gameActions[session.game].handleGameCommand(message, session, client);
                 }
-            } else {
-              await message.reply('Não há nenhum jogo ou lobby em andamento para sair.');
-          }
-          return;
-        }
-        
-        if (command === '!jogo') {
-            if (session) {
-            return message.reply(`❌ Um jogo de *${session.game}* já está em andamento. Para encerrar, use \`!sair\`.`);
             }
-
-            const gameName = commandArgs[1]?.toLowerCase();
-            if (!gameName) {
-                return message.reply(`🤔 Qual jogo você quer iniciar? Use: \`!jogo <nome do jogo>\`\n\n*Jogos disponíveis:*\n${JOGOS_VALIDOS.join(', ')}`);
-            }
-
-            if (!JOGOS_VALIDOS.includes(gameName)) {
-                return message.reply(`❌ Jogo inválido! Os jogos disponíveis são: *${JOGOS_VALIDOS.join(', ')}*.`);
-            }
-
-            const groupId = message.from;
-            const creatorId = message.author || message.from;
-            const novaSessao = sessionManager.createSession(groupId, gameName, creatorId);
-
-            if (novaSessao) {
-                await lobby.criarLobby(novaSessao, client);
-            } else {
-                await message.reply('❌ Ocorreu um erro ao criar a sessão do jogo.');
-            }
-            return;
-        }
-        
-        if (!session) {
-            if (command.startsWith('!')) {
-                 await message.reply('Digite: `!botzap` para mais informações');
-            }
-            return;
         }
 
-        if (session.status === 'lobby') {
-            await lobby.handleLobbyCommand(message, session, client);
-            return;
-        }
-
-        if (session.status === 'em_jogo') {
-            switch (session.game) {
-                case 'poker':
-                    await pokerActions.handleGameCommand(message, session, client);
-                    break;
-                case 'truco':
-                    await trucoActions.handleGameCommand(message, session, client);
-                    break;
-                case 'forca':
-                    await forcaActions.handleGameCommand(message, session, client);
-                    break;
-                case 'velha':
-                    await velhaActions.handleGameCommand(message, session, client);
-                    break;
-                case 'uno':
-                    await unoActions.handleGameCommand(message, session, client);
-                    break;
-                case 'xadrez':
-                    await xadrezActions.handleGameCommand(message, session, client);
-                    break;
-            }
-            return;
+        // Se chegou até aqui, é um comando desconhecido
+        if (command.startsWith('!') || command.startsWith('/')) {
+            await message.reply('Comando desconhecido. Digite `!botzap` para ver a lista de comandos.');
         }
 
     } catch (error) {
@@ -471,17 +318,31 @@ async function handleCommand(message, client) {
 
 module.exports = handleCommand;const mongoose = require('mongoose');
 
-// Este é o "molde" da sua ficha. Ele define os campos e seus tipos.
+// Sub-schema para os itens do inventário
+const itemSchema = new mongoose.Schema({
+    nome: { type: String, required: true },
+    quantidade: { type: Number, default: 1 },
+    peso: { type: Number, default: 0 },
+    descricao: { type: String, default: "N/A" }
+}, { _id: false }); // _id: false evita que o Mongoose crie um ID para cada item
+
 const fichaSchema = new mongoose.Schema({
-    // Usaremos o ID do jogador do WhatsApp como identificador único.
-    playerId: {
-        type: String,
-        required: true,
-        unique: true
-    },
+    playerId: { type: String, required: true, unique: true },
     nome: { type: String, default: "Sem Nome" },
     classe: { type: String, default: "N/A" },
+    raca: { type: String, default: "N/A" },
     nivel: { type: Number, default: 1 },
+    
+    // Detalhes Narrativos e Físicos
+    idade: { type: String, default: "N/A" },
+    altura: { type: String, default: "N/A" },
+    peso: { type: String, default: "N/A" },
+    alinhamento: { type: String, default: "N/A" },
+    antecedente: { type: String, default: "N/A" },
+    divindade: { type: String, default: "N/A" },
+    historia: { type: String, default: "N/A" },
+
+    // Atributos Principais
     hp_max: { type: Number, default: 10 },
     hp_atual: { type: Number, default: 10 },
     ca: { type: Number, default: 10 },
@@ -491,13 +352,326 @@ const fichaSchema = new mongoose.Schema({
     inteligencia: { type: Number, default: 10 },
     sabedoria: { type: Number, default: 10 },
     carisma: { type: Number, default: 10 },
-    // O inventário será uma lista de strings.
-    inventario: [String]
+
+    // --- NOVOS CAMPOS DE CARGA ---
+    carga_atual: { type: Number, default: 0 },
+    carga_maxima: { type: Number, default: 50 }, // Ex: 10 (força) * 5 = 50
+    
+    // --- INVENTÁRIO ATUALIZADO ---
+    inventario: [itemSchema], // Usa o sub-schema definido acima
+
+    // Listas
+    habilidades: [String],
+    ataques: [String],
+    magias: [String],
 });
 
-// Criamos e exportamos o "Model". É através dele que faremos todas as operações
-// de criar, ler, atualizar e apagar fichas no banco de dados.
-module.exports = mongoose.model('Ficha', fichaSchema);node_modules/
+module.exports = mongoose.model('Ficha', fichaSchema);
+// models/Transacao.js
+const mongoose = require('mongoose');
+
+const transacaoSchema = new mongoose.Schema({
+    // Este campo vai guardar o ID do WhatsApp de quem enviou o comando
+    userId: { type: String, required: true }, 
+    
+    // 'enum' garante que o tipo só pode ser um desses dois valores
+    tipo: { type: String, required: true, enum: ['ganho', 'gasto'] }, 
+    
+    valor: { type: Number, required: true },
+    categoria: { type: String, required: true },
+    descricao: { type: String }, // Campo opcional
+}, { 
+    // Adiciona os campos 'createdAt' e 'updatedAt' automaticamente
+    timestamps: true 
+}); 
+
+module.exports = mongoose.model('Transacao', transacaoSchema);// commands/jogo.js
+const sessionManager = require('../sessions/sessionManager');
+const lobby = require('../games/lobby');
+const JOGOS_VALIDOS = ['poker', 'truco', 'forca', 'velha', 'uno', 'xadrez'];
+
+module.exports = {
+    name: '!jogo',
+    aliases: ['!sair'],
+    description: 'Gerencia as sessões de jogo (iniciar e sair).',
+
+    // Note que a função recebe 'client' e 'session' como novos parâmetros
+    async execute(message, command, body, client, session) {
+        const { from, author } = message;
+        const commandArgs = body.split(' ');
+
+        if (command === '!jogo') {
+            if (session) {
+                return message.reply(`❌ Um jogo de *${session.game}* já está em andamento. Para encerrar, use \`!sair\`.`);
+            }
+
+            const gameName = commandArgs[1]?.toLowerCase();
+
+            if (!gameName) {
+                return message.reply(`🤔 Qual jogo você quer iniciar? Use: \`!jogo <nome>\`\n\n*Disponíveis:*\n${JOGOS_VALIDOS.join(', ')}`);
+            }
+
+            if (!JOGOS_VALIDOS.includes(gameName)) {
+                return message.reply(`❌ Jogo inválido! Os jogos disponíveis são: *${JOGOS_VALIDOS.join(', ')}*.`);
+            }
+
+            const creatorId = author || from;
+            const novaSessao = sessionManager.createSession(from, gameName, creatorId);
+
+            if (novaSessao) {
+                await lobby.criarLobby(novaSessao, client);
+            } else {
+                await message.reply('❌ Ocorreu um erro ao criar a sessão do jogo.');
+            }
+        }
+
+        if (command === '!sair') {
+            if (session) {
+                const gameName = session.game.charAt(0).toUpperCase() + session.game.slice(1);
+                if (sessionManager.endSession(session.groupId)) {
+                    await message.reply(`✅ O jogo de *${gameName}* foi encerrado.`);
+                }
+            } else {
+                await message.reply('Não há nenhum jogo ou lobby em andamento para sair.');
+            }
+        }
+    }
+};// commands/rpg.js
+const rpgHandler = require('../controllers/rpgHandler');
+
+module.exports = {
+    name: '!rpg',
+    aliases: [
+        '!dados', '!criar-ficha', '!ficha', '!ficha-completa', '!set', '!apagar-ficha', 
+        '!remover', '!rpg-ajuda', '!rpg-help', '!add', '!rmv', '!classes', 
+        '!racas', '!addhab', '!rmvhab', '!addmagia', '!rmvmagia', 
+        '!addataque', '!rmvataque', '!inventario'
+    ],
+    description: 'Módulo de comandos para o sistema de RPG.',
+    async execute(message, command, body) {
+        // A lógica de atalho para dados (ex: !1d20) será tratada no commandHandler.
+        await rpgHandler.handleRpgCommand(message);
+    }
+};// commands/musica.js
+const handleMusica = require('../controllers/musicaHandler');
+
+module.exports = {
+    name: '!musica',
+    description: 'Busca o link de uma música no YouTube.',
+    async execute(message, command, body, client) {
+        const query = body.split(' ').slice(1).join(' ');
+        return await handleMusica(message, client, query);
+    }
+};// commands/mega.js
+const fs = require('fs');
+const path = require('path');
+const { parse } = require('csv-parse');
+
+// Lógica do Mega-Sena agora está encapsulada dentro do seu próprio módulo
+const resultadosPassados = new Set();
+let megaCarregada = false;
+const csvFilePath = path.join(__dirname, '..', 'assets', 'mega_sena.csv');
+
+fs.createReadStream(csvFilePath)
+    .pipe(parse({ delimiter: ';', from_line: 2 }))
+    .on('data', function (row) {
+        try {
+            const numeros = row.slice(2, 8).map(Number).sort((a, b) => a - b);
+            if (numeros.length === 6 && !numeros.some(isNaN)) {
+                resultadosPassados.add(numeros.join(','));
+            }
+        } catch (e) { /* Ignora erros de linha */ }
+    })
+    .on('end', function () {
+        megaCarregada = true;
+        console.log(`[Mega-Sena] Módulo carregado com ${resultadosPassados.size} resultados.`);
+    })
+    .on('error', function (error) {
+        console.error('[Mega-Sena] Erro no módulo:', error.message);
+    });
+
+function gerarJogoInedito() {
+    if (!megaCarregada) return null;
+    while (true) {
+        const numeros = new Set();
+        while (numeros.size < 6) {
+            numeros.add(Math.floor(Math.random() * 60) + 1);
+        }
+        const numerosOrdenados = Array.from(numeros).sort((a, b) => a - b);
+        const jogoStr = numerosOrdenados.join(',');
+        if (!resultadosPassados.has(jogoStr)) {
+            return numerosOrdenados;
+        }
+    }
+}
+
+module.exports = {
+    name: '!mega',
+    description: 'Gera um jogo inédito da Mega-Sena.',
+    async execute(message, command, body) {
+        const jogo = gerarJogoInedito();
+        if (jogo) {
+            const resultado = jogo.map(n => n.toString().padStart(2, '0')).join(' - ');
+            await message.reply(`*Combinação Inédita Encontrada!*\n\n✨ *${resultado}* ✨\n\nEssa nunca saiu! Boa sorte!`);
+        } else {
+            await message.reply('Desculpe, ainda estou processando o histórico de jogos. Tente novamente em um instante.');
+        }
+    }
+};module.exports = {
+    name: '!botzap',
+    description: 'Exibe a mensagem de ajuda principal.',
+    async execute(message, command, body) {
+        const botZapMessage =
+            `*Como começar um jogo?*\n` +
+            `Digite \`!jogo <nome do jogo>\`\n\n` +
+            `*Jogos Disponíveis:*\n` +
+            `• Poker\n• Truco\n• Forca\n• Velha\n• Uno\n• Xadrez\n\n` +
+            `---\n\n` +
+            `*Outros comandos:*\n` +
+            `• \`!figurinha\` - Cria um sticker.\n` +
+            `• \`!mega\` - Gera um jogo da Mega-Sena.\n` +
+            `• \`!moeda\` - Joga cara ou coroa.\n` +
+            `• \`!bicho\` - Resultado do jogo do bicho.\n` +
+            `• \`!responda <pergunta>\` - Responde perguntas.\n` +
+            `• \`!musica <nome>\` - Envia link de música.\n` +
+            `• \`!rpg\` - Ajuda para o módulo de RPG.\n` +
+            `• \`!sair\` - Encerra um jogo em andamento.\n\n` +
+            `Vamos começar? 🎉`;
+        
+        await message.reply(botZapMessage);
+    }
+};// commands/figurinha.js
+module.exports = {
+    name: '!figurinha',
+    aliases: ['!sticker'],
+    description: 'Cria uma figurinha a partir de uma imagem ou vídeo.',
+    async execute(message, command, body, client) { // <--- Note o 'client' aqui
+        const { from } = message;
+
+        if (message.hasQuotedMsg) {
+            const quotedMsg = await message.getQuotedMessage();
+            if (quotedMsg.hasMedia) {
+                await message.reply("Criando sua figurinha, um momento... 🎨");
+                try {
+                    const media = await quotedMsg.downloadMedia();
+                    await client.sendMessage(from, media, { sendMediaAsSticker: true, stickerAuthor: "BotZap 🤖", stickerName: "Criado pelo Bot" });
+                } catch (error) {
+                    await message.reply("❌ Ih, deu erro! Tente com outra imagem ou vídeo curto.");
+                }
+            } else {
+                await message.reply("Você precisa responder a uma imagem ou vídeo para eu transformar em figurinha!");
+            }
+        } else {
+            await message.reply("Para criar uma figurinha, responda a uma imagem com o comando `!figurinha`.");
+        }
+    }
+};// commands/financas.js
+
+// Importamos o modelo de dados que este comando utiliza
+const Transacao = require('../models/Transacao');
+
+module.exports = {
+    // Definimos todos os nomes e apelidos que ativam este comando
+    name: '/financas',
+    aliases: ['/gasto', '/g', '/ganho', '/r'],
+    description: 'Gerencia as finanças pessoais.',
+
+    // A função principal que será executada
+    async execute(message, command, body) {
+        
+        // CASO 1: O usuário pediu ajuda
+        if (command === '/financas') {
+            const helpMessage = `*Módulo de Finanças Pessoais* 💸\n\n` +
+                `Use os comandos abaixo para registrar suas transações:\n\n` +
+                `*Para registrar um gasto:*\n` +
+                `\`!gasto <valor> <categoria> [descrição]\`\n` +
+                `_Apelido: \`!g <valor> <categoria>_\`\n\n` +
+                `*Para registrar um ganho:*\n` +
+                `\`!ganho <valor> <categoria> [descrição]\`\n` +
+                `_Apelido: \`!r <valor> <categoria>_\`\n\n` +
+                `*Exemplos:*\n` +
+                `\`!g 50,50 iFood Pedido no Outback\`\n` +
+                `\`!r 1200 Salario Adiantamento`;
+            
+            await message.reply(helpMessage);
+            return;
+        }
+
+        // CASO 2: O usuário está registrando uma transação
+        const userId = message.author || message.from;
+        const args = body.split(' ');
+        
+        const isGasto = command === '/gasto' || command === '/g';
+        const tipo = isGasto ? 'gasto' : 'ganho';
+        
+        const valor = parseFloat(args[1]?.replace(',', '.'));
+        const categoria = args[2];
+        const descricao = args.slice(3).join(' ');
+
+        if (isNaN(valor) || !categoria) {
+            return await message.reply(`❌ Formato inválido! Use \`/financas\` para ver os exemplos.`);
+        }
+
+        try {
+            const novaTransacao = new Transacao({
+                userId, tipo, valor, categoria, 
+                descricao: descricao || null
+            });
+            await novaTransacao.save();
+
+            const tipoCapitalized = tipo.charAt(0).toUpperCase() + tipo.slice(1);
+            await message.reply(
+                `✅ *${tipoCapitalized} registrado para ${message._data.notifyName}!* \n\n` +
+                `*Valor:* R$ ${valor.toFixed(2)}\n` +
+                `*Categoria:* ${categoria}` +
+                `${descricao ? `\n*Descrição:* ${descricao}` : ''}`
+            );
+        } catch (error) {
+            console.error("Erro ao salvar transação:", error);
+            await message.reply("❌ Ocorreu um erro ao salvar no banco de dados.");
+        }
+    }
+};// commands/uteis.js
+module.exports = {
+    name: '!id',
+    aliases: ['!debug', '!moeda', '!bicho', '!responda'],
+    description: 'Comandos utilitários diversos.',
+    async execute(message, command, body) {
+        const { from } = message;
+
+        switch (command) {
+            case '!id':
+                await message.reply(`O ID deste chat é:\n\`${from}\``);
+                break;
+            
+            case '!debug':
+                console.log('===== OBJETO MESSAGE COMPLETO =====');
+                console.log(message);
+                console.log('=================================');
+                await message.reply('O objeto da mensagem foi impresso no console do bot. 😉');
+                break;
+
+            case '!moeda':
+                await message.reply('Jogando a moeda... 🪙');
+                const resultado = Math.random() < 0.5 ? 'Cara' : 'Coroa';
+                const emoji = resultado === 'Cara' ? '🗿' : '👑';
+                await message.reply(`Deu *${resultado}*! ${emoji}`);
+                break;
+            
+            case '!bicho':
+                const animais = ['Avestruz G1', 'Águia G2', 'Burro G3', 'Borboleta G4', 'Cachorro G5', 'Cabra G6', 'Carneiro G7', 'Camelo G8', 'Cobra G9', 'Coelho G10', 'Cavalo G11', 'Elefante G12', 'Galo G13', 'Gato G14', 'Jacaré G15', 'Leão G16', 'Macaco G17', 'Porco G18', 'Pavão G19', 'Peru G20', 'Touro G21', 'Tigre G22', 'Urso G23', 'Veado G24', 'Vaca G25'];
+                const sorteado = animais[Math.floor(Math.random() * animais.length)];
+                await message.reply(`O resultado de hoje é: *${sorteado}*`);
+                break;
+
+            case '!responda':
+                const respostas = ["Sim.", "Não.", "Com certeza!", "Definitivamente não.", "Talvez.", "Os astros indicam que sim.", "Concentre-se e pergunte de novo.", "Não conte com isso."];
+                const respostaMistica = respostas[Math.floor(Math.random() * respostas.length)];
+                await message.reply(`O Botzap responde:\n\n*${respostaMistica}*`);
+                break;
+        }
+    }
+};node_modules/
 zConcatenador
 .env
 
@@ -505,13 +679,42 @@ zConcatenador
 **.data.json
 **.node-persist**
 **_IGNORE_**
-# end managed// Importamos o nosso "molde" de Ficha que acabamos de criar.
-const Ficha = require('../models/Ficha');
+# end managed// RPG/racas.js
 
-// O objeto de limites continua útil para validação.
+// Este arquivo define os arquétipos de raça para a criação de personagens.
+// Os valores representam os BÔNUS aplicados aos atributos base da classe.
+const RACAS = {
+    humano: {
+        descricao: "Versáteis e adaptáveis.",
+        modificadores: { forca: 1, destreza: 1, constituicao: 1, inteligencia: 1, sabedoria: 1, carisma: 1 }
+    },
+    elfo: {
+        descricao: "Ágeis e perceptivos, com afinidade para a magia.",
+        modificadores: { destreza: 2, inteligencia: 1, constituicao: -1 }
+    },
+    anao: {
+        descricao: "Robustos e resilientes, mestres do artesanato.",
+        modificadores: { constituicao: 2, forca: 1, carisma: -1 }
+    },
+    orc: {
+        descricao: "Fortes e ferozes, nascidos para o combate.",
+        modificadores: { forca: 2, constituicao: 1, inteligencia: -2, carisma: -1 }
+    },
+    halfling: {
+        descricao: "Pequenos e sortudos, mestres da furtividade.",
+        modificadores: { destreza: 2, carisma: 1, forca: -1 }
+    }
+};
+
+module.exports = RACAS;// Importações
+const Ficha = require('../models/Ficha');
+const ARQUETIPOS = require('./classes');
+const RACAS = require('./racas.js');
+
 const ATRIBUTO_LIMITES = {
     nome: { type: 'string', maxLength: 50 },
     classe: { type: 'string', maxLength: 50 },
+    raca: { type: 'string', maxLength: 50 },
     nivel: { type: 'number', min: 1, max: 100 },
     hp_max: { type: 'number', min: 1, max: 9999 },
     hp_atual: { type: 'number', min: 0, max: 9999 },
@@ -522,197 +725,403 @@ const ATRIBUTO_LIMITES = {
     inteligencia: { type: 'number', min: 1, max: 100 },
     sabedoria: { type: 'number', min: 1, max: 100 },
     carisma: { type: 'number', min: 1, max: 100 },
+    idade: { type: 'string', maxLength: 30 },
+    altura: { type: 'string', maxLength: 30 },
+    peso: { type: 'string', maxLength: 30 },
+    alinhamento: { type: 'string', maxLength: 50 },
+    antecedente: { type: 'string', maxLength: 2048 },
+    divindade: { type: 'string', maxLength: 50 },
+    historia: { type: 'string', maxLength: 2048 },
 };
 
+// --- FUNÇÕES HELPER ---
 
-// --- FUNÇÕES DE COMANDO REESCRITAS PARA MONGODB ---
-
-// Comando !criar-ficha
-async function handleCriarFicha(message) {
-    const playerId = message.author || message.from;
-    
-    const fichaExistente = await Ficha.findOne({ playerId: playerId });
-    if (fichaExistente) {
-        return message.reply('❌ Você já possui uma ficha. Use `!apagar-ficha` para recomeçar.');
-    }
-
-    // Pega o nome do personagem da mensagem
-    const nomePersonagem = message.body.split(' ').slice(1).join(' ').trim();
-
-    // Valida se um nome foi fornecido
-    if (!nomePersonagem) {
-        return message.reply('❌ Formato inválido! Use: `!criar-ficha <nome do personagem>`');
-    }
-
-    // Valida o tamanho do nome
-    if (nomePersonagem.length > ATRIBUTO_LIMITES.nome.maxLength) {
-        return message.reply(`❌ O nome do personagem é muito longo (máximo de ${ATRIBUTO_LIMITES.nome.maxLength} caracteres).`);
-    }
-
-    // Cria a ficha já com o nome fornecido
-    await Ficha.create({ 
-        playerId: playerId,
-        nome: nomePersonagem 
+function aplicarArquétipo(ficha, nomeClasse) {
+    const arquétipo = ARQUETIPOS[nomeClasse.toLowerCase()];
+    if (!arquétipo) return;
+    Object.keys(arquétipo).forEach(key => {
+        ficha[key] = arquétipo[key];
     });
-    
-    await message.reply(`✅ Ficha para *${nomePersonagem}* criada com sucesso! Use \`!ficha\` para vê-la.`);
+    ficha.classe = nomeClasse.charAt(0).toUpperCase() + nomeClasse.slice(1);
+    ficha.carga_maxima = (ficha.forca || 10) * 5;
 }
 
-// Comando !ficha
-async function handleVerFicha(message) {
-    const playerId = message.author || message.from;
-    
-    // ANTES: Lia o arquivo .json
-    // AGORA: Procura pela ficha no banco de dados
-    const ficha = await Ficha.findOne({ playerId: playerId });
+function aplicarRaca(ficha, nomeRaca) {
+    const raca = RACAS[nomeRaca.toLowerCase()];
+    if (!raca || !raca.modificadores) return;
+    Object.keys(raca.modificadores).forEach(key => {
+        if (ficha[key] !== undefined) {
+            ficha[key] += raca.modificadores[key];
+        }
+    });
+    ficha.raca = nomeRaca.charAt(0).toUpperCase() + nomeRaca.slice(1);
+    ficha.carga_maxima = (ficha.forca || 10) * 5;
+}
 
-    if (!ficha) {
-        return message.reply('Você ainda não tem uma ficha. Crie uma com `!criar-ficha`.');
+function recalcularCarga(ficha) {
+    let cargaTotal = 0;
+    if (ficha.inventario && ficha.inventario.length > 0) {
+        ficha.inventario.forEach(item => {
+            cargaTotal += (item.peso || 0) * (item.quantidade || 0);
+        });
+    }
+    ficha.carga_atual = parseFloat(cargaTotal.toFixed(2));
+}
+
+function formatarInventarioResumido(inventario) {
+    if (!inventario || inventario.length === 0) {
+        return "_Vazio_\n_Use !inventario para ver os detalhes._";
+    }
+    const ultimosItens = inventario.slice(-3);
+    const itensFormatados = ultimosItens.map(item => `• ${item.nome} (x${item.quantidade})`).join('\n');
+    return `${itensFormatados}\n_Use !inventario para ver os detalhes._`;
+}
+
+// --- FUNÇÕES DE COMANDO ---
+
+async function handleCriarFicha(message) {
+    const playerId = message.author || message.from;
+
+    // 1. Verifica se o JOGADOR já tem uma ficha
+    const fichaExistente = await Ficha.findOne({ playerId: playerId });
+    if (fichaExistente) {
+        return message.reply(`❌ Você já possui uma ficha com o nome *${fichaExistente.nome}*. Use \`!apagar-ficha\` para recomeçar.`);
+    }
+    
+    // 2. Valida se um nome foi fornecido e o captura
+    const nomePersonagem = message.body.split(' ').slice(1).join(' ').trim();
+    if (!nomePersonagem) {
+        return message.reply('❌ Formato inválido. Você precisa fornecer um nome. Use: `!criar-ficha <nome do personagem>`');
     }
 
-    // A lógica de formatar a resposta continua a mesma!
+    // 3. Verifica se o NOME do personagem já existe no banco de dados
+    const nomeExistente = await Ficha.findOne({ nome: { $regex: new RegExp(`^${nomePersonagem}$`, 'i') } });
+    if (nomeExistente) {
+        return message.reply(`❌ Já existe um personagem com o nome "*${nomePersonagem}*". Por favor, escolha outro nome.`);
+    }
+
+    // Cria a ficha apenas com o nome, o resto usará os valores padrão do Schema
+    const fichaData = {
+        playerId: playerId,
+        nome: nomePersonagem,
+    };
+    
+    await Ficha.create(fichaData);
+    await message.reply(`✅ Ficha para *${fichaData.nome}* criada com sucesso! Use o comando \`!set\` para definir classe, raça e outros atributos.`);
+}
+
+async function findFicha(message) {
+    const args = message.body.split(' ').slice(1);
+    const nomeBusca = args.join(' ').trim();
+
+    if (nomeBusca) {
+        // Busca por nome (case-insensitive)
+        const ficha = await Ficha.findOne({ nome: { $regex: new RegExp(`^${nomeBusca}$`, 'i') } });
+        if (!ficha) {
+            await message.reply(`❌ Ficha com o nome "*${nomeBusca}*" não encontrada.`);
+            return null;
+        }
+        return ficha;
+    } else {
+        // Busca pelo ID do jogador que enviou a mensagem
+        const playerId = message.author || message.from;
+        const ficha = await Ficha.findOne({ playerId: playerId });
+        if (!ficha) {
+            await message.reply('❌ Você ainda não tem uma ficha. Crie uma com `!criar-ficha <nome>`.');
+            return null;
+        }
+        return ficha;
+    }
+}
+
+
+async function handleSetAtributo(message) {
+    const playerId = message.author || message.from;
+    const ficha = await Ficha.findOne({ playerId: playerId });
+    if (!ficha) return message.reply('Você ainda não tem uma ficha.');
+
+    const args = message.body.split(' ').slice(1).join(' ');
+    const parts = args.split('=');
+    let chave = parts[0].trim().toLowerCase();
+    const valor = parts.slice(1).join('=').trim();
+    if (!chave || !valor) return message.reply('Formato inválido.');
+
+    const alias = { for: 'forca', des: 'destreza', con: 'constituicao', int: 'inteligencia', sab: 'sabedoria', car: 'carisma' };
+    if (alias[chave]) chave = alias[chave];
+
+    if (chave === 'classe' || chave === 'raca') {
+        if (chave === 'classe') {
+            if (!ARQUETIPOS[valor.toLowerCase()]) return message.reply(`❌ Classe "*${valor}*" inválida.`);
+            ficha.classe = valor.charAt(0).toUpperCase() + valor.slice(1).toLowerCase();
+        }
+        if (chave === 'raca') {
+            if (!RACAS[valor.toLowerCase()]) return message.reply(`❌ Raça "*${valor}*" inválida.`);
+            ficha.raca = valor.charAt(0).toUpperCase() + valor.slice(1).toLowerCase();
+        }
+        
+        if (ficha.classe && ficha.classe !== 'N/A') aplicarArquétipo(ficha, ficha.classe);
+        if (ficha.raca && ficha.raca !== 'N/A') aplicarRaca(ficha, ficha.raca);
+        
+        await ficha.save();
+        return message.reply(`✅ Atributos recalculados para a nova ${chave}!`);
+    }
+
+    if (chave === 'forca') ficha.carga_maxima = (Number(valor) || 10) * 5;
+
+    const limite = ATRIBUTO_LIMITES[chave];
+    if (!limite) return message.reply(`❌ Atributo desconhecido: *${chave}*.`);
+
+    if (limite.type === 'string') {
+        if (valor.length > limite.maxLength) return message.reply(`❌ Valor muito longo.`);
+        ficha[chave] = valor;
+    } else if (limite.type === 'number') {
+        const numero = Number(valor);
+        if (isNaN(numero)) return message.reply(`❌ Valor deve ser um número.`);
+        const maxVal = (chave === 'hp_atual') ? ficha.hp_max : limite.max;
+        if (numero < limite.min || numero > maxVal) return message.reply(`❌ Valor fora dos limites.`);
+        ficha[chave] = Math.floor(numero);
+    }
+    
+    await ficha.save();
+    await message.reply(`✅ Atributo *${chave}* atualizado!`);
+}
+
+async function handleVerFicha(message) {
+    const ficha = await findFicha(message);
+    if (!ficha) return;
+
     let resposta = `*--- ${ficha.nome} ---*\n`;
-    resposta += `*Classe:* ${ficha.classe}\n`;
+    resposta += `*Raça:* ${ficha.raca || 'N/A'} | *Classe:* ${ficha.classe || 'N/A'}\n`;
     resposta += `*Nível:* ${ficha.nivel}\n`;
-    resposta += `*HP:* ${ficha.hp_atual} / ${ficha.hp_max} ❤️\n`;
+    resposta += `*HP:* ${ficha.hp_atual}/${ficha.hp_max} ❤️\n`;
     resposta += `*CA:* ${ficha.ca} 🛡️\n\n`;
-    resposta += `*Atributos:*\n`;
-    resposta += `For: ${ficha.forca} | Des: ${ficha.destreza} | Con: ${ficha.constituicao}\n`;
+    resposta += `*Atributos:*\nFor: ${ficha.forca} | Des: ${ficha.destreza} | Con: ${ficha.constituicao}\n`;
     resposta += `Int: ${ficha.inteligencia} | Sab: ${ficha.sabedoria} | Car: ${ficha.carisma}\n\n`;
-    resposta += `*Inventário:*\n`;
-    resposta += ficha.inventario && ficha.inventario.length > 0 ? `• ${ficha.inventario.join('\n• ')}` : "Vazio";
+    resposta += `*Inventário (${ficha.carga_atual}/${ficha.carga_maxima} kg):*\n`;
+    resposta += formatarInventarioResumido(ficha.inventario);
+    
+    resposta += `\n\n---\n_Para ajuda com os comandos, digite !rpg-help_`;
 
     await message.reply(resposta);
 }
 
-// Comando !set
-async function handleSetAtributo(message) {
-    const playerId = message.author || message.from;
-    const ficha = await Ficha.findOne({ playerId: playerId });
+async function handleVerFichaCompleta(message) {
+    const ficha = await findFicha(message);
+    if (!ficha) return;
 
-    if (!ficha) {
-        return message.reply('Você ainda não tem uma ficha. Crie uma com `!criar-ficha`.');
-    }
+    let resposta = `*--- ${ficha.nome} ---*\n\n`;
+    resposta += `*${ficha.classe || 'N/A'} | ${ficha.raca || 'N/A'}* - Nível ${ficha.nivel}\n`;
+    resposta += `*Alinhamento:* ${ficha.alinhamento || 'N/A'}\n*Divindade:* ${ficha.divindade || 'N/A'}\n\n`;
+    resposta += `*HP:* ${ficha.hp_atual}/${ficha.hp_max} ❤️ | *CA:* ${ficha.ca} 🛡️\n\n`;
+    resposta += `*Atributos:*\nFor: ${ficha.forca} | Des: ${ficha.destreza} | Con: ${ficha.constituicao}\nInt: ${ficha.inteligencia}  | Sab: ${ficha.sabedoria} | Car: ${ficha.carisma}\n\n`;
+    resposta += `*Ataques ⚔*\n${ficha.ataques && ficha.ataques.length > 0 ? `• ${ficha.ataques.join('\n• ')}` : "_Nenhum_"}\n\n`;
+    resposta += `*Magias ✨*\n${ficha.magias && ficha.magias.length > 0 ? `• ${ficha.magias.join('\n• ')}` : "_Nenhuma_"}\n\n`;
+    resposta += `*Habilidades* 💪\n${ficha.habilidades && ficha.habilidades.length > 0 ? `• ${ficha.habilidades.join('\n• ')}` : "_Nenhuma_"}\n\n`;
+    resposta += `*Inventário (${ficha.carga_atual}/${ficha.carga_maxima} kg)* 🎒\n`;
+    resposta += formatarInventarioResumido(ficha.inventario);
+    resposta += `\n\n`;
+    resposta += `*Detalhes Pessoais:* 👤\nIdade: ${ficha.idade || 'N/A'} | Altura: ${ficha.altura || 'N/A'} | Peso: ${ficha.peso || 'N/A'}\n\n`;
+    resposta += `*Antecedente:* 📜 ${ficha.antecedente || 'N/A'}\n\n`;
+    resposta += `*História* 📖 ${ficha.historia || 'N/A'}\n`;
+    resposta += `\n_Para ajuda com os comandos, digite:_ \n!rpg-help`;
 
-    const args = message.body.split(' ').slice(1).join(' ');
-    const [chave, ...valorArray] = args.split('=');
-    if (!chave || !valorArray.length) {
-        return message.reply('Formato inválido. Use `!set <atributo>=<valor>`.');
-    }
-    const valor = valorArray.join('=').trim();
-    let chaveNormalizada = chave.trim().toLowerCase();
-    
-    if (chaveNormalizada === 'hp') {
-        chaveNormalizada = 'hp_atual';
-    }
-
-    const limite = ATRIBUTO_LIMITES[chaveNormalizada];
-    if (!limite) {
-        return message.reply(`❌ Atributo desconhecido: *${chaveNormalizada}*.`);
-    }
-
-    // Lógica de validação continua a mesma...
-    if (limite.type === 'string') {
-        if (valor.length > limite.maxLength) {
-            return message.reply(`❌ O valor para *${chaveNormalizada}* é muito longo (máx: ${limite.maxLength} caracteres).`);
-        }
-        ficha[chaveNormalizada] = valor;
-    } else if (limite.type === 'number') {
-        const numero = Number(valor);
-        if (isNaN(numero)) {
-            return message.reply(`❌ O valor para *${chaveNormalizada}* deve ser um número.`);
-        }
-        const maxVal = (chaveNormalizada === 'hp_atual') ? ficha.hp_max : limite.max;
-        const minVal = limite.min;
-        if (numero < minVal || numero > maxVal) {
-            return message.reply(`❌ O valor para *${chaveNormalizada}* deve estar entre ${minVal} e ${maxVal}.`);
-        }
-        ficha[chaveNormalizada] = Math.floor(numero);
-    }
-    
-    // ANTES: fs.writeFileSync(...)
-    // AGORA: Salva as alterações do documento no banco de dados
-    await ficha.save();
-    await message.reply(`✅ Atributo *${chaveNormalizada}* atualizado para *${valor}*!`);
+    await message.reply(resposta);
 }
 
-// Comando !add
 async function handleAddItem(message) {
     const playerId = message.author || message.from;
     const ficha = await Ficha.findOne({ playerId: playerId });
+    if (!ficha) return message.reply('❌ Você não tem uma ficha.');
 
-    if (!ficha) {
-        return message.reply('❌ Você não tem uma ficha para adicionar itens.');
+    const args = message.body.split(' ').slice(1).join(' ').split(',').map(arg => arg.trim());
+    const nome = args[0];
+    if (!nome) return message.reply('Formato inválido. Use `!add <nome>, [qtd], [peso], [desc]`');
+
+    const quantidade = parseInt(args[1]) || 1;
+    const peso = parseFloat(args[2]) || 0;
+    const descricao = args[3] || 'N/A';
+
+    const itemExistente = ficha.inventario.find(item => item.nome.toLowerCase() === nome.toLowerCase());
+
+    if (itemExistente) {
+        itemExistente.quantidade += quantidade;
+    } else {
+        if (ficha.inventario.length >= 50) return message.reply('❌ Inventário cheio (limite de 50 tipos de itens).');
+        ficha.inventario.push({ nome, quantidade, peso, descricao });
     }
 
-    const valor = message.body.split(' ').slice(1).join(' ').trim();
-    if (!valor) {
-        return message.reply('Formato inválido. Use `!add item1, item2, ...`');
+    recalcularCarga(ficha);
+    await ficha.save();
+    
+    let resposta = `✅ *${quantidade}x ${nome}* adicionado(s).`;
+    if (ficha.carga_atual > ficha.carga_maxima) {
+        resposta += `\n⚠️ *Atenção: Você está sobrecarregado!* (${ficha.carga_atual}/${ficha.carga_maxima} kg)`;
     }
-
-    const novosItens = valor.split(',').map(item => item.trim().substring(0, 70)).filter(item => item);
-    if (ficha.inventario.length + novosItens.length > 20) {
-        return message.reply(`❌ Seu inventário excederia o limite de 20 itens.`);
-    }
-
-    // ANTES: ficha.inventario.push(...); salvarFicha(...)
-    // AGORA: Usa o comando $push do MongoDB para adicionar itens ao array
-    await Ficha.updateOne({ playerId: playerId }, { $push: { inventario: { $each: novosItens } } });
-
-    await message.reply(`✅ Itens adicionados: *${novosItens.join(', ')}*`);
+    await message.reply(resposta);
 }
 
-// Comando !rmv
 async function handleRemoveItem(message) {
     const playerId = message.author || message.from;
     const ficha = await Ficha.findOne({ playerId: playerId });
+    if (!ficha || ficha.inventario.length === 0) return message.reply('❌ Seu inventário está vazio.');
 
-    if (!ficha || !ficha.inventario || ficha.inventario.length === 0) {
-        return message.reply('❌ Seu inventário está vazio ou você não tem uma ficha.');
-    }
+    const args = message.body.split(' ').slice(1).join(' ').split(',').map(arg => arg.trim());
+    const nome = args[0];
+    if (!nome) return message.reply('Formato inválido. Use `!rmv <nome>, [qtd]`');
 
-    const itemParaRemover = message.body.split(' ').slice(1).join(' ').trim();
-    if (!itemParaRemover) {
-        return message.reply('Formato inválido. Use `!rmv <nome do item>`.');
-    }
+    const quantidadeRemover = parseInt(args[1]);
+    const itemIndex = ficha.inventario.findIndex(item => item.nome.toLowerCase() === nome.toLowerCase());
+    if (itemIndex === -1) return message.reply(`❌ Item "*${nome}*" não encontrado.`);
+
+    const item = ficha.inventario[itemIndex];
     
-    const itemOriginal = ficha.inventario.find(item => item.toLowerCase() === itemParaRemover.toLowerCase());
-
-    if (!itemOriginal) {
-        return message.reply(`❌ Item "*${itemParaRemover}*" não encontrado no seu inventário.`);
+    if (isNaN(quantidadeRemover) || quantidadeRemover >= item.quantidade) {
+        ficha.inventario.splice(itemIndex, 1);
+        await message.reply(`✅ Todos os itens "*${item.nome}*" foram removidos.`);
+    } else {
+        item.quantidade -= quantidadeRemover;
+        await message.reply(`✅ *${quantidadeRemover}x ${item.nome}* removido(s). Restam: ${item.quantidade}.`);
     }
 
-    // ANTES: ficha.inventario.splice(...); salvarFicha(...)
-    // AGORA: Usa o comando $pull do MongoDB para remover um item do array
-    await Ficha.updateOne({ playerId: playerId }, { $pull: { inventario: itemOriginal } });
-
-    await message.reply(`✅ Item "*${itemOriginal}*" removido do seu inventário.`);
+    recalcularCarga(ficha);
+    await ficha.save();
 }
 
-// Comando !apagar-ficha
+async function handleVerInventario(message) {
+    const playerId = message.author || message.from;
+    const ficha = await Ficha.findOne({ playerId: playerId });
+    if (!ficha) return message.reply('❌ Você não tem uma ficha.');
+
+    let resposta = `*--- Inventário de ${ficha.nome} ---*\n`;
+    resposta += `*Carga Total:* ${ficha.carga_atual} / ${ficha.carga_maxima} kg\n\n`;
+
+    if (ficha.inventario.length === 0) {
+        resposta += "_Vazio_";
+    } else {
+        ficha.inventario.forEach(item => {
+            resposta += `*• ${item.nome} (x${item.quantidade})*\n`;
+            resposta += `  _Peso: ${item.peso} kg | Desc: ${item.descricao}_\n`;
+        });
+    }
+    
+    if (ficha.carga_atual > ficha.carga_maxima) {
+        resposta += `\n\n⚠️ *Atenção: Você está sobrecarregado!*`;
+    }
+    await message.reply(resposta);
+}
+
+async function gerenciarListaSimples(message, tipo) {
+    const acao = message.body.startsWith('!add') ? 'add' : 'remove';
+    const singular = tipo.slice(0, -1);
+    const limite = { magias: 50, ataques: 10, habilidades: 20 }[tipo];
+
+    const playerId = message.author || message.from;
+    const ficha = await Ficha.findOne({ playerId: playerId });
+    if (!ficha) return message.reply('❌ Você não tem uma ficha.');
+
+    if (acao === 'remove' && (!ficha[tipo] || ficha[tipo].length === 0)) return message.reply(`❌ Você não tem ${tipo} para remover.`);
+
+    const valor = message.body.split(' ').slice(1).join(' ').trim();
+    if (!valor) return message.reply(`Formato inválido.`);
+
+    if (acao === 'add') {
+        const novosItens = valor.split(',').map(i => i.trim().substring(0, 100)).filter(i => i);
+        if ((ficha[tipo].length + novosItens.length) > limite) return message.reply(`❌ Limite de ${limite} ${tipo} atingido.`);
+        await Ficha.updateOne({ playerId: playerId }, { $push: { [tipo]: { $each: novosItens } } });
+        await message.reply(`✅ ${singular}(s) adicionado(s): *${novosItens.join(', ')}*`);
+    } else {
+        const itemParaRemover = ficha[tipo].find(i => i.toLowerCase() === valor.toLowerCase());
+        if (!itemParaRemover) return message.reply(`❌ ${singular} "*${valor}*" não encontrado.`);
+        await Ficha.updateOne({ playerId: playerId }, { $pull: { [tipo]: itemParaRemover } });
+        await message.reply(`✅ ${singular} "*${itemParaRemover}*" removido.`);
+    }
+}
+
+const handleAddHabilidade = (message) => gerenciarListaSimples(message, 'habilidades');
+const handleRmvHabilidade = (message) => gerenciarListaSimples(message, 'habilidades');
+const handleAddAtaque = (message) => gerenciarListaSimples(message, 'ataques');
+const handleRmvAtaque = (message) => gerenciarListaSimples(message, 'ataques');
+const handleAddMagia = (message) => gerenciarListaSimples(message, 'magias');
+const handleRmvMagia = (message) => gerenciarListaSimples(message, 'magias');
+
 async function handleApagarFicha(message) {
     const playerId = message.author || message.from;
-    
-    // ANTES: fs.unlinkSync(...)
-    // AGORA: Deleta o documento correspondente ao playerId
     const resultado = await Ficha.deleteOne({ playerId: playerId });
-
-    if (resultado.deletedCount === 0) {
-        return message.reply('❌ Você não possui uma ficha para apagar.');
-    }
-
-    await message.reply('✅ Sua ficha foi apagada com sucesso. Você pode criar uma nova com `!criar-ficha`.');
+    if (resultado.deletedCount === 0) return message.reply('❌ Você não possui uma ficha para apagar.');
+    await message.reply('✅ Sua ficha foi apagada com sucesso.');
 }
 
-// Exporta as funções para serem usadas no commandHandler
+async function handleVerClasses(message) {
+    let resposta = "*Classes Disponíveis no BotZap RPG* ⚔️\n\n";
+    for (const classe in ARQUETIPOS) {
+        const data = ARQUETIPOS[classe];
+        const nomeClasse = classe.charAt(0).toUpperCase() + classe.slice(1);
+        resposta += `*${nomeClasse}*\nHP: ${data.hp_max} | CA: ${data.ca}\n`;
+        resposta += `For:${data.forca}|Des:${data.destreza}|Con:${data.constituicao}|Int:${data.inteligencia}|Sab:${data.sabedoria}|Car:${data.carisma}\n\n`;
+    }
+    await message.reply(resposta);
+}
+
+async function handleVerRacas(message) {
+    let resposta = "*Raças Disponíveis no BotZap RPG* 🌍\n\n";
+    for (const raca in RACAS) {
+        const data = RACAS[raca];
+        const nomeRaca = raca.charAt(0).toUpperCase() + raca.slice(1);
+        resposta += `*${nomeRaca}*: ${data.descricao}\n`;
+        const mods = Object.entries(data.modificadores).map(([attr, val]) => `${attr.substring(0,3)}: ${val > 0 ? '+' : ''}${val}`).join(' | ');
+        resposta += `_Modificadores: ${mods}_\n\n`;
+    }
+    await message.reply(resposta);
+}
+
 module.exports = {
-    handleCriarFicha,
-    handleVerFicha,
-    handleSetAtributo,
-    handleAddItem,
-    handleRemoveItem,
-    handleApagarFicha
-};// client.js
+    handleCriarFicha, handleVerFicha, handleVerFichaCompleta, handleSetAtributo, handleAddItem,
+    handleRemoveItem, handleAddHabilidade, handleRmvHabilidade, handleAddAtaque,
+    handleRmvAtaque, handleAddMagia, handleRmvMagia, handleApagarFicha,
+    handleVerClasses, handleVerRacas, handleVerInventario
+};// RPG/classes.js
+
+// Este arquivo define os arquétipos de classe para a criação de personagens.
+// Agora, ele foca apenas nos atributos base. Itens e habilidades são adicionados manualmente.
+const ARQUETIPOS = {
+    guerreiro: {
+        forca: 16, destreza: 12, constituicao: 14, inteligencia: 10, sabedoria: 10, carisma: 10,
+        hp_max: 12, hp_atual: 12, ca: 15
+    },
+    mago: {
+        forca: 8, destreza: 12, constituicao: 10, inteligencia: 16, sabedoria: 14, carisma: 10,
+        hp_max: 8, hp_atual: 8, ca: 11
+    },
+    clerigo: {
+        forca: 12, destreza: 8, constituicao: 14, inteligencia: 10, sabedoria: 16, carisma: 12,
+        hp_max: 10, hp_atual: 10, ca: 16
+    },
+    ladrao: {
+        forca: 10, destreza: 16, constituicao: 12, inteligencia: 12, sabedoria: 8, carisma: 14,
+        hp_max: 8, hp_atual: 8, ca: 13
+    },
+    barbaro: {
+        forca: 17, destreza: 12, constituicao: 16, inteligencia: 8, sabedoria: 10, carisma: 8,
+        hp_max: 15, hp_atual: 15, ca: 13
+    },
+    paladino: {
+        forca: 15, destreza: 10, constituicao: 14, inteligencia: 10, sabedoria: 13, carisma: 15,
+        hp_max: 12, hp_atual: 12, ca: 16
+    },
+    patrulheiro: {
+        forca: 12, destreza: 17, constituicao: 14, inteligencia: 10, sabedoria: 15, carisma: 8,
+        hp_max: 10, hp_atual: 10, ca: 14
+    },
+    bardo: {
+        forca: 10, destreza: 14, constituicao: 12, inteligencia: 12, sabedoria: 10, carisma: 17,
+        hp_max: 8, hp_atual: 8, ca: 12
+    }
+};
+
+// Exportamos o objeto para que outros arquivos possam usá-lo.
+module.exports = ARQUETIPOS;
+// client.js
+require('dotenv').config();
 
 // --- BLOCO DE IMPORTAÇÕES ---
 const { Client, LocalAuth } = require('whatsapp-web.js');
@@ -747,15 +1156,7 @@ client.initialize();
 module.exports = { client };{
   "enableGroupFilter": true,
   "allowedGroupIds": [
-    "120363335667865869@g.us",
-    "120363418811209728@g.us",
-    "120363421115205962@g.us",
-    "5511963582414-1585413384@g.us",
-    "120363401314456521@g.us",
-    "120363402853535952@g.us",
-    "123456789@g.us",
-    "120363401314456521@g.us",
-    "120363419895687875@g.us" ]
+     ]
 }/**
  * Função de log inteligente que adiciona prefixo com nome do grupo e do autor.
  * @param {object | null} message - O objeto da mensagem da whatsapp-web.js.
@@ -1118,10 +1519,10 @@ module.exports = {
 
 L
 wa_web_user_prefs_cache_store$55433d9b-ec94-4e52-a899-87b5bf41f8f2�( 0
-;
-wa-stickers$ee4b9aaa-ebe1-4c11-ad8c-63460f4e5dd4��2( 0
+<
+wa-stickers$ee4b9aaa-ebe1-4c11-ad8c-63460f4e5dd4���( 0
 M
-lru-media-array-buffer-cache$4036eb5d-7968-4eae-9922-ea22cded0e00��( 0https://web.whatsapp.com/https://web.whatsapp.com/ ({
+lru-media-array-buffer-cache$4036eb5d-7968-4eae-9922-ea22cded0e00��( 0https://web.whatsapp.com/https://web.whatsapp.com/ ({
   "name": "bot-whatsapp",
   "version": "1.0.0",
   "lockfileVersion": 3,

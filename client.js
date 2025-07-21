@@ -1,4 +1,5 @@
 // client.js
+require('dotenv').config();
 
 // --- BLOCO DE IMPORTAÇÕES ---
 const { Client, LocalAuth } = require('whatsapp-web.js');
