@@ -2,7 +2,6 @@ require('dotenv').config();
 const connectDB = require('./config/db');
 const { client } = require('./client');
 const handleCommand = require('./controllers/commandHandler');
-const express = require('express');
 
 // Evento para gerar o QR Code para autenticação
 client.on('qr', (qr) => {
